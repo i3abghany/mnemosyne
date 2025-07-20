@@ -160,7 +160,9 @@ def main():
     if coverage:
         cov.stop()
         cov.save()
-        print(f"\nCoverage report saved to {cov.xml_report()}")
+        cov.report()
+        cov.xml_report(outfile='coverage.xml')
+        print(f"\nCoverage report saved to coverage.xml")
 
     print(f"\n{'='*60}")
     print("OVERALL SUMMARY")
