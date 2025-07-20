@@ -423,9 +423,15 @@ def print_expr_tree(expr: Expr, indent: str = ""):
 def get_trace_from_file(file_path):
     trace = open(file_path).readlines()
     trace = [line.strip() for line in trace if line.strip()]
-    trace = [line.split(':')[1]
-             for line in trace if ':' in line and not line.startswith('#')]
-    return trace
+    result = []
+    for line in trace:
+        if line.startswith('#'):
+            continue
+        if ':' in line:
+            result.append(line.split(':', 1)[1].strip())
+        else:
+            result.append(line)
+    return result
 
 
 if __name__ == "__main__":
