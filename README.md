@@ -4,7 +4,7 @@ A trace-based symbolic execution engine for x86-64 assembly.
 
 ## Usage
 
-### Using the SymbolicEngine Class (Recommended)
+### Using the SymbolicEngine Class
 
 ```python
 from engine import SymbolicEngine, expand_expr, optimize_expr
