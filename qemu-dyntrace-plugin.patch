@@ -1,0 +1,87 @@
+From 3f1d34432dcee12fced64800cd3b3a9574f287fa Mon Sep 17 00:00:00 2001
+From: Mahmoud Abumandour <mam47@sfu.ca>
+Date: Sun, 20 Jul 2025 14:49:39 -0700
+Subject: [PATCH] Add dyntrace TCG plugin
+
+---
+ contrib/plugins/dyntrace.c  | 56 +++++++++++++++++++++++++++++++++++++
+ contrib/plugins/meson.build |  2 +-
+ 2 files changed, 57 insertions(+), 1 deletion(-)
+ create mode 100644 contrib/plugins/dyntrace.c
+
+diff --git a/contrib/plugins/dyntrace.c b/contrib/plugins/dyntrace.c
+new file mode 100644
+index 0000000000..0e0c24332d
+--- /dev/null
++++ b/contrib/plugins/dyntrace.c
+@@ -0,0 +1,56 @@
++#include <stdint.h>
++#include <stdio.h>
++#include <glib.h>
++#include <qemu-plugin.h>
++
++QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
++
++typedef struct {
++    uint64_t vaddr;
++    char *disas;
++} Instruction;
++
++GHashTable *insn_table;
++
++static void vcpu_insn_exec(unsigned int cpu_index, void *udata)
++{
++    Instruction *insn = (Instruction *) udata;
++    g_autofree char *disas = g_strdup(insn->disas);
++    uint64_t vaddr = insn->vaddr;
++    qemu_plugin_outs(g_strdup_printf("0x%" PRIx64 ", '%s'\n", vaddr, disas));
++}
++
++static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
++{
++    size_t n = qemu_plugin_tb_n_insns(tb);
++    for (size_t i = 0; i < n; i++) {
++        struct qemu_plugin_insn *insn = qemu_plugin_tb_get_insn(tb, i);
++
++        Instruction *rec = NULL;
++        if (g_hash_table_contains(insn_table, GINT_TO_POINTER(qemu_plugin_insn_vaddr(insn)))) {
++            rec = g_hash_table_lookup(insn_table, GINT_TO_POINTER(qemu_plugin_insn_vaddr(insn)));
++        } else {
++            rec = g_new0(Instruction, 1);
++            rec->vaddr = qemu_plugin_insn_vaddr(insn);
++            rec->disas = g_strdup(qemu_plugin_insn_disas(insn));
++            g_hash_table_insert(insn_table, GINT_TO_POINTER(rec->vaddr), rec);
++        }
++
++        qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_insn_exec, QEMU_PLUGIN_CB_NO_REGS, rec);
++    }
++}
++
++static void plugin_exit(qemu_plugin_id_t id, void *p)
++{
++    g_hash_table_destroy(insn_table);
++}
++
++QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
++                                           const qemu_info_t *info,
++                                           int argc, char **argv)
++{
++    insn_table = g_hash_table_new(g_direct_hash, g_direct_equal);
++    qemu_plugin_register_vcpu_tb_trans_cb(id, vcpu_tb_trans);
++    qemu_plugin_register_atexit_cb(id, plugin_exit, NULL);
++    return 0;
++}
+diff --git a/contrib/plugins/meson.build b/contrib/plugins/meson.build
+index 1876bc7843..7151e0a737 100644
+--- a/contrib/plugins/meson.build
++++ b/contrib/plugins/meson.build
+@@ -1,5 +1,5 @@
+ contrib_plugins = ['bbv', 'cache', 'cflow', 'drcov', 'execlog', 'hotblocks',
+-                   'hotpages', 'howvec', 'hwprofile', 'ips', 'stoptrigger']
++                   'hotpages', 'howvec', 'hwprofile', 'ips', 'stoptrigger', 'dyntrace']
+ if host_os != 'windows'
+   # lockstep uses socket.h
+   contrib_plugins += 'lockstep'
+-- 
+2.34.1
+
