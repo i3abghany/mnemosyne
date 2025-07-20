@@ -20,7 +20,7 @@ trace = [
 ]
 
 # Alternatively, load a trace from a file
-# trace = get_trace_from_file("path/to/trace.txt")
+# trace = get_trace_from_file("path/to/trace.log")
 
 engine.parse_trace_and_execute(trace)
 
