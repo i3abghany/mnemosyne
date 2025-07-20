@@ -146,6 +146,10 @@ def parse_address(addr_str: str, state: SymbolicState):
         # For displacement-only addressing
         addr = BinOp("+", addr, Const(0))
 
+    # Optimize the address expression. This ensures equivalent address
+    # expressions are coalesced.
+    addr = optimize_expr(addr, state)
+
     return addr
 
 
