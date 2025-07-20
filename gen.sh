@@ -58,3 +58,4 @@ awk -F': ' -v addr="$MAIN_ADDR" -v size="$MAIN_SIZE" '
 mv "$BASENAME.filtered.log" "$BASENAME.log"
 
 sed -i "s/'//g" "$BASENAME.log"
+sed -i 's/\([0-9a-fA-Fx]*\), \(.*\)/\1: \2/' "$BASENAME.log"
