@@ -1,61 +1,152 @@
 #!/bin/bash
 
-if [ $# -ne 1 ]; then
-    echo "Usage: $0 <file.c>"
+set -e
+
+# Configuration
+QEMU_PATH="/localhome/mam47/Desktop/qemu"
+QEMU_BUILD_DIR="$QEMU_PATH/build"
+QEMU_EXEC_PATH="$QEMU_BUILD_DIR/qemu-x86_64"
+
+BUILD_PLUGIN=false
+
+usage() {
+    echo "Usage: $0 [--build-plugin] <file.c>"
+    echo "Options:"
+    echo "  --build-plugin   Build QEMU and dyntrace plugin if not already built"
+    echo "  <file.c>         C source file to compile and run with QEMU"
     exit 1
-fi
+}
 
-FILE=$1
-if [ ! -f "$FILE" ]; then
-    echo "File $FILE does not exist."
-    exit 1
-fi
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --build-plugin)
+                BUILD_PLUGIN=true
+                shift
+                ;;
+            -*)
+                echo "Unknown option $1"
+                usage
+                ;;
+            *)
+                FILE=$1
+                shift
+                ;;
+        esac
+    done
 
-BASENAME=$(basename "$FILE" .c)
+    if [ -z "$FILE" ]; then
+        echo "Error: No input file specified."
+        usage
+    fi
+    
+    if [ ! -f "$FILE" ]; then
+        echo "Error: File $FILE does not exist."
+        exit 1
+    fi
+}
 
-gcc -o "$BASENAME" "$FILE" -static -fno-stack-protector -fomit-frame-pointer
+compile_program() {
+    local file=$1
+    local basename=$(basename "$file" .c)
+    
+    echo "Compiling $file..." >&2
+    gcc -o "$basename" "$file" -static -fno-stack-protector -fomit-frame-pointer
+    
+    if [ $? -ne 0 ]; then
+        echo "Error: Compilation failed." >&2
+        exit 1
+    fi
+    
+    echo "$basename"
+}
 
-if [ $? -ne 0 ]; then
-    echo "Compilation failed."
-    exit 1
-fi
+check_qemu_executable() {
+    if [ ! -x "$QEMU_EXEC_PATH" ]; then
+        echo "QEMU executable not found at $QEMU_EXEC_PATH... attempting to build QEMU."
+        return 1 
+    fi
+    return 0
+}
 
-QEMU_BUILD_DIR="/path/to/your/qemu/build"
-QEMU_PATH="$QEMU_BUILD_DIR/qemu-x86_64"
+build_qemu_and_plugin() {
+    echo "Building QEMU and dyntrace plugin..."
+    
+    pushd "$QEMU_PATH" > /dev/null
+    
+    mkdir -p build
+    cd build
 
-if [ ! -x "$QEMU_PATH" ]; then
-    echo "QEMU executable not found at $QEMU_PATH."
-    exit 1
-fi
+    ../configure --enable-plugins --target-list=x86_64-linux-user
+    ninja
+    
+    echo "QEMU and plugin built successfully."
+    popd > /dev/null
+}
 
-"$QEMU_PATH" -D "$BASENAME.log" -d plugin -plugin "$QEMU_BUILD_DIR/tests/tcg/plugins/libinsn.so" "$BASENAME"
+run_with_qemu() {
+    local basename=$1
+    
+    echo "Running $basename with QEMU and dyntrace plugin..."
+    
+    set +e
+    "$QEMU_EXEC_PATH" -D "$basename.log" -d plugin \
+        -plugin "$QEMU_BUILD_DIR/contrib/plugins/libdyntrace.so" "$basename"
+    set -e
+}
 
-MAIN_ADDR=$(nm "$BASENAME" | grep ' T main' | awk '{print $1}')
-MAIN_ADDR=$(echo "$MAIN_ADDR" | sed 's/^0*//')
-MAIN_ADDR="0x$MAIN_ADDR"
+filter_and_clean_log() {
+    local basename=$1
+    
+    local main_addr=$(nm "$basename" | grep ' T main' | awk '{print $1}')
+    main_addr=$(echo "$main_addr" | sed 's/^0*//')
+    main_addr="0x$main_addr"
 
-MAIN_SIZE=$(nm "$BASENAME" -S | grep ' T main' | awk '{print $2}')
-MAIN_SIZE=$(echo "$MAIN_SIZE" | sed 's/^0*//')
-MAIN_SIZE="0x$MAIN_SIZE"
+    local main_size=$(nm "$basename" -S | grep ' T main' | awk '{print $2}')
+    main_size=$(echo "$main_size" | sed 's/^0*//')
+    main_size="0x$main_size"
 
-echo "Main function address: $MAIN_ADDR"
-echo "Main function size: $MAIN_SIZE"
+    echo "Main function address: $main_addr"
+    echo "Main function size: $main_size"
 
-# filter the log file to only include lines related to the main function
-sed -i "1,/^$MAIN_ADDR/{/^$MAIN_ADDR/!d;}" "$BASENAME.log"
+    # Filter the log file to only include lines related to the main function
+    sed -i "1,/^$main_addr/{/^$main_addr/!d;}" "$basename.log"
 
-# for each line in the log file, split by ':', and if the first part is greater
-# than MAIN_ADDR + MAIN_SIZE, remove all lines after it this is to filter out
-# any lines that are not related to the main function we assume the log file is
-# in the format "address: instruction"
-awk -F': ' -v addr="$MAIN_ADDR" -v size="$MAIN_SIZE" '
-{
-    if (strtonum($1) > strtonum(addr) + strtonum(size)) {
-        exit
-    }
-    print $0
-}' "$BASENAME.log" > "$BASENAME.filtered.log"
-mv "$BASENAME.filtered.log" "$BASENAME.log"
+    # For each line in the log file, split by the first ',', and if the first
+    # part is greater than main_addr + main_size, remove all lines after it
+    awk -F': ' -v addr="$main_addr" -v size="$main_size" '
+    {
+        if (strtonum($1) > strtonum(addr) + strtonum(size)) {
+            exit
+        }
+        print $0
+    }' "$basename.log" > "$basename.filtered.log"
+    mv "$basename.filtered.log" "$basename.log"
 
-sed -i "s/'//g" "$BASENAME.log"
-sed -i 's/\([0-9a-fA-Fx]*\), \(.*\)/\1: \2/' "$BASENAME.log"
+    # Remove all single quotes and format the log
+    sed -i "s/'//g" "$basename.log"
+
+    # Substitute the first comma with a colon to make splitting easier as
+    # instructions may contain commas
+    sed -i 's/\([0-9a-fA-Fx]*\), \(.*\)/\1: \2/' "$basename.log"
+    
+    echo "Log filtering and cleaning complete."
+}
+
+main() {
+    parse_arguments "$@"
+    
+    local basename=$(compile_program "$FILE")
+    
+    if ! check_qemu_executable || [ "$BUILD_PLUGIN" = true ]; then
+        build_qemu_and_plugin
+    fi
+    
+    run_with_qemu "$basename"
+    
+    filter_and_clean_log "$basename"
+    
+    echo "Processing complete. Filtered log saved to $basename.log"
+}
+
+main "$@"
