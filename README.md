@@ -47,10 +47,10 @@ engine.parse_trace_and_execute(["mov %rcx, %rax"])
 
 ```bash
 # Run all tests
-python run_tests.py
+$ python run_tests.py
 
 # Run quick tests
-python run_tests.py --quick
+$ python run_tests.py --quick
 ```
 
 ## Trace Generation from Source Code
