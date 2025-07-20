@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 
 import unittest
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from engine import SymbolicState, parse_address, Var, Mem, BinOp, Const
 
 

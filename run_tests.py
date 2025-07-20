@@ -17,7 +17,8 @@ def run_test_suite(test_module_name, description):
     print(f"{description}")
     print(f"{'='*60}")
 
-    test_module = __import__(test_module_name)
+    import importlib
+    test_module = importlib.import_module(test_module_name)
 
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(test_module)
@@ -127,9 +128,9 @@ def main():
     start_time = time.time()
 
     test_suites = [
-        ('test_engine', 'CORE ENGINE TESTS'),
-        ('test_performance', 'PERFORMANCE AND STRESS TESTS'),
-        ('test_address_parsing', 'ADDRESS PARSING TESTS'),
+        ('test.test_engine', 'CORE ENGINE TESTS'),
+        ('test.test_performance', 'PERFORMANCE AND STRESS TESTS'),
+        ('test.test_address_parsing', 'ADDRESS PARSING TESTS'),
     ]
 
     all_results = []
@@ -196,7 +197,7 @@ def main():
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == '--quick':
-        result = run_test_suite('test_engine', 'QUICK ENGINE TESTS')
+        result = run_test_suite('test.test_engine', 'QUICK ENGINE TESTS')
         sys.exit(0 if result['success'] else 1)
     else:
         sys.exit(main())
