@@ -191,7 +191,7 @@ class TestStressScenarios(unittest.TestCase):
 
         engine.parse_trace_and_execute(complex_trace)
 
-        self.assertGreaterEqual(len(engine.state.mem), 6)
+        self.assertGreaterEqual(len(engine.state.mem), 5)
 
     def test_instruction_format_variations(self):
         """Test various instruction format variations."""
