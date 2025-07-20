@@ -3,7 +3,7 @@
 set -e
 
 # Configuration
-QEMU_PATH="/localhome/mam47/Desktop/qemu"
+QEMU_PATH="${QEMU_PATH:-/localhome/mam47/Desktop/qemu}"
 QEMU_BUILD_DIR="$QEMU_PATH/build"
 QEMU_EXEC_PATH="$QEMU_BUILD_DIR/qemu-x86_64"
 
@@ -72,7 +72,13 @@ check_qemu_executable() {
 build_qemu_and_plugin() {
     echo "Building QEMU and dyntrace plugin..."
     
+    local mnemosyne_dir="$(dirname "$(readlink -f "$0")")"
     pushd "$QEMU_PATH" > /dev/null
+
+    if [ ! -f "contrib/plugins/dyntrace.c" ]; then
+        echo "Applying dyntrace plugin patch..."
+        git apply "$mnemosyne_dir/qemu-dyntrace-plugin.patch"
+    fi
     
     mkdir -p build
     cd build
