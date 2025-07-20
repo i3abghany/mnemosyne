@@ -174,8 +174,35 @@ class SymbolicEngine:
 
         line = re.sub(r"%e([a-z0-9]+)", r"%r\1", line)
 
+        # xor[lq] %reg, %reg
+        if m := re.match(r"xor[lq]? %([a-z0-9]+), %([a-z0-9]+)", line):
+            src_reg, dst_reg = m[1], m[2]
+            src_val = self.state.read_reg(src_reg)
+            dst_val = self.state.read_reg(dst_reg)
+            new_val = BinOp("^", dst_val, src_val)
+            var, _ = self.state.write_reg(dst_reg, new_val)
+            logger.info(f"{var} = {new_val}")
+            return
+
+        # lea[lq] $imm, %reg
+        if m := re.match(r"lea[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), %([a-z0-9]+)", line):
+            imm_str, reg = m[1], m[2]
+            imm = int(imm_str, 16) if imm_str.startswith(
+                ('-0x', '0x')) else int(imm_str)
+            var, expr = self.state.write_reg(reg, Const(imm))
+            logger.info(f"{var} = {expr}")
+            return
+
+        # lea[lq] mem, %reg
+        if m := re.match(r"lea[lq]? (.+), %([a-z0-9]+)", line):
+            addr_str, reg = m[1], m[2]
+            addr = parse_address(addr_str, self.state)
+            var, expr = self.state.write_reg(reg, addr)
+            logger.info(f"{var} = {expr}")
+            return
+
         # mov $imm, %reg
-        if m := re.match(r"mov[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), %([a-z0-9]+)", line):
+        if m := re.match(r"mov(?:abs)?[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), %([a-z0-9]+)", line):
             imm_str, reg = m[1], m[2]
             imm = int(imm_str, 16) if imm_str.startswith(
                 ('-0x', '0x')) else int(imm_str)
@@ -201,15 +228,6 @@ class SymbolicEngine:
             logger.info(f"{mem_var} = {Const(imm)}")
             return
 
-        # mov mem, %reg
-        if m := re.match(r"mov[lq]? (.+), %([a-z0-9]+)", line):
-            addr_str, reg = m[1], m[2]
-            addr = parse_address(addr_str, self.state)
-            val = self.state.mem_load(addr)
-            var, _ = self.state.write_reg(reg, val)
-            logger.info(f"{var} = {val}")
-            return
-
         # mov %reg, mem
         if m := re.match(r"mov[lq]? %([a-z0-9]+), (.+)", line):
             reg, addr_str = m[1], m[2]
@@ -217,6 +235,15 @@ class SymbolicEngine:
             addr = parse_address(addr_str, self.state)
             mem_var, _ = self.state.mem_store(addr, reg_val)
             logger.info(f"{mem_var} = {reg_val}")
+            return
+
+        # mov mem, %reg
+        if m := re.match(r"mov[lq]? (.+), %([a-z0-9]+)", line):
+            addr_str, reg = m[1], m[2]
+            addr = parse_address(addr_str, self.state)
+            val = self.state.mem_load(addr)
+            var, _ = self.state.write_reg(reg, val)
+            logger.info(f"{var} = {val}")
             return
 
         # add $imm, %reg
