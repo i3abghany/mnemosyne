@@ -252,7 +252,7 @@ class TestTraceExecution(unittest.TestCase):
         engine.parse_trace_and_execute(trace)
 
         # Should create memory variable
-        addr_str = str(BinOp("+", Var("rsp", 0), Const(0)))
+        addr_str = str(Var("rsp", 0))
         self.assertIn(addr_str, self.state.mem)
         self.assertEqual(str(self.state.mem[addr_str]), "100")
 
@@ -294,7 +294,7 @@ class TestTraceExecution(unittest.TestCase):
         engine.parse_trace_and_execute(trace)
 
         # Memory should be updated with addition
-        addr_str = str(BinOp("+", Var("rsp", 0), Const(0)))
+        addr_str = str(Var("rsp", 0))
         self.assertIn(addr_str, self.state.mem)
 
     def test_add_memory_to_register(self):
@@ -511,7 +511,7 @@ class TestIntegration(unittest.TestCase):
         self.assertIn("rax_2", state.definitions)  # Final rax version
 
         # Check memory was updated
-        addr_str = str(BinOp("+", Var("rsp", 0), Const(0)))
+        addr_str = str(Var("rsp", 0))
         self.assertIn(addr_str, state.mem)
 
         # Test optimization of final expression
@@ -559,7 +559,7 @@ class TestIntegration(unittest.TestCase):
         engine.parse_trace_and_execute(trace)
 
         # The memory should contain the updated value
-        addr_str = str(BinOp("+", Var("rsp", 0), Const(0)))
+        addr_str = str(Var("rsp", 0))
         self.assertIn(addr_str, state.mem)
 
         # The register should load from memory
