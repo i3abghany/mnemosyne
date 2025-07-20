@@ -146,10 +146,6 @@ def parse_address(addr_str: str, state: SymbolicState):
         # For displacement-only addressing
         addr = BinOp("+", addr, Const(0))
 
-    # Optimize the address expression. This ensures equivalent address
-    # expressions are coalesced.
-    addr = optimize_expr(addr, state)
-
     return addr
 
 
@@ -197,6 +193,7 @@ class SymbolicEngine:
         if m := re.match(r"lea[lq]? (.+), %([a-z0-9]+)", line):
             addr_str, reg = m[1], m[2]
             addr = parse_address(addr_str, self.state)
+            addr = optimize_expr(addr, self.state)
             var, expr = self.state.write_reg(reg, addr)
             logger.info(f"{var} = {expr}")
             return
@@ -224,6 +221,7 @@ class SymbolicEngine:
             imm = int(imm_str, 16) if imm_str.startswith(
                 ('-0x', '0x')) else int(imm_str)
             addr = parse_address(addr_str, self.state)
+            addr = optimize_expr(addr, self.state)
             mem_var, _ = self.state.mem_store(addr, Const(imm))
             logger.info(f"{mem_var} = {Const(imm)}")
             return
@@ -233,6 +231,7 @@ class SymbolicEngine:
             reg, addr_str = m[1], m[2]
             reg_val = self.state.read_reg(reg)
             addr = parse_address(addr_str, self.state)
+            addr = optimize_expr(addr, self.state)
             mem_var, _ = self.state.mem_store(addr, reg_val)
             logger.info(f"{mem_var} = {reg_val}")
             return
@@ -241,6 +240,7 @@ class SymbolicEngine:
         if m := re.match(r"mov[lq]? (.+), %([a-z0-9]+)", line):
             addr_str, reg = m[1], m[2]
             addr = parse_address(addr_str, self.state)
+            addr = optimize_expr(addr, self.state)
             val = self.state.mem_load(addr)
             var, _ = self.state.write_reg(reg, val)
             logger.info(f"{var} = {val}")
@@ -273,6 +273,7 @@ class SymbolicEngine:
             imm = int(imm_str, 16) if imm_str.startswith(
                 ('-0x', '0x')) else int(imm_str)
             addr = parse_address(addr_str, self.state)
+            addr = optimize_expr(addr, self.state)
             old_val = self.state.mem_load(addr)
             new_val = BinOp("+", old_val, Const(imm))
             mem_var, _ = self.state.mem_store(addr, new_val)
@@ -284,6 +285,7 @@ class SymbolicEngine:
             reg, addr_str = m[1], m[2]
             reg_val = self.state.read_reg(reg)
             addr = parse_address(addr_str, self.state)
+            addr = optimize_expr(addr, self.state)
             old_val = self.state.mem_load(addr)
             new_val = BinOp("+", old_val, reg_val)
             mem_var, _ = self.state.mem_store(addr, new_val)
@@ -294,6 +296,7 @@ class SymbolicEngine:
         if m := re.match(r"add[lq]? (.+), %([a-z0-9]+)", line):
             addr_str, reg = m[1], m[2]
             addr = parse_address(addr_str, self.state)
+            addr = optimize_expr(addr, self.state)
             mem_val = self.state.mem_load(addr)
             reg_val = self.state.read_reg(reg)
             new_val = BinOp("+", reg_val, mem_val)
