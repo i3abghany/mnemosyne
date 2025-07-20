@@ -16,7 +16,7 @@ engine = SymbolicEngine()
 trace = [
     "mov $42, %rax",
     "add $8, %rax", 
-    "mov %rax, (%rsp)"
+    "retq"
 ]
 
 # Alternatively, load a trace from a file
