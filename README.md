@@ -7,7 +7,7 @@ A trace-based symbolic execution engine for x86-64 assembly.
 ### Using the SymbolicEngine Class
 
 ```python
-from engine import SymbolicEngine, expand_expr, optimize_expr
+from engine import SymbolicEngine, expand_expr, optimize_expr, get_trace_from_file
 
 # Create and use the engine
 engine = SymbolicEngine()
@@ -18,6 +18,9 @@ trace = [
     "add $8, %rax", 
     "mov %rax, (%rsp)"
 ]
+
+# Alternatively, load a trace from a file
+# trace = get_trace_from_file("path/to/trace.txt")
 
 engine.parse_trace_and_execute(trace)
 
