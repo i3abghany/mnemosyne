@@ -154,9 +154,87 @@ class SymbolicEngine:
         self.state = state or SymbolicState()
 
     def parse_trace_and_execute(self, trace: List[str]):
-        """Parse and execute a trace of assembly instructions."""
         for line in trace:
             self._execute_instruction(line)
+
+    def _handle_binary_op(self, opcode: str, line: str) -> bool:
+        # Map opcodes to their symbolic operators
+        op_map = {
+            "add": "+",
+            "sub": "-",
+            "xor": "^",
+            "and": "&",
+            "or": "|",
+            "shl": "<<",
+            "shr": ">>",
+            "sar": ">>",
+            "imul": "*"
+        }
+
+        if opcode not in op_map:
+            return False
+
+        sym_op = op_map[opcode]
+
+        # Pattern 1: opcode $imm, %reg
+        if m := re.match(rf"{opcode}[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), %([a-z0-9]+)", line):
+            imm_str, reg = m[1], m[2]
+            imm = int(imm_str, 16) if imm_str.startswith(
+                ('-0x', '0x')) else int(imm_str)
+            reg_val = self.state.read_reg(reg)
+            new_val = BinOp(sym_op, reg_val, Const(imm))
+            var, _ = self.state.write_reg(reg, new_val)
+            logger.info(f"{var} = {new_val}")
+            return True
+
+        # Pattern 2: opcode %reg1, %reg2
+        if m := re.match(rf"{opcode}[lq]? %([a-z0-9]+), %([a-z0-9]+)", line):
+            src_reg, dst_reg = m[1], m[2]
+            src_val = self.state.read_reg(src_reg)
+            dst_val = self.state.read_reg(dst_reg)
+            new_val = BinOp(sym_op, dst_val, src_val)
+            var, _ = self.state.write_reg(dst_reg, new_val)
+            logger.info(f"{var} = {new_val}")
+            return True
+
+        # Pattern 3: opcode $imm, mem
+        if m := re.match(rf"{opcode}[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), (.+)", line):
+            imm_str, addr_str = m[1], m[2]
+            imm = int(imm_str, 16) if imm_str.startswith(
+                ('-0x', '0x')) else int(imm_str)
+            addr = parse_address(addr_str, self.state)
+            addr = optimize_expr(addr, self.state)
+            old_val = self.state.mem_load(addr)
+            new_val = BinOp(sym_op, old_val, Const(imm))
+            mem_var, _ = self.state.mem_store(addr, new_val)
+            logger.info(f"{mem_var} = {new_val}")
+            return True
+
+        # Pattern 4: opcode %reg, mem
+        if m := re.match(rf"{opcode}[lq]? %([a-z0-9]+), (.+)", line):
+            reg, addr_str = m[1], m[2]
+            reg_val = self.state.read_reg(reg)
+            addr = parse_address(addr_str, self.state)
+            addr = optimize_expr(addr, self.state)
+            old_val = self.state.mem_load(addr)
+            new_val = BinOp(sym_op, old_val, reg_val)
+            mem_var, _ = self.state.mem_store(addr, new_val)
+            logger.info(f"{mem_var} = {new_val}")
+            return True
+
+        # Pattern 5: opcode mem, %reg
+        if m := re.match(rf"{opcode}[lq]? (.+), %([a-z0-9]+)", line):
+            addr_str, reg = m[1], m[2]
+            addr = parse_address(addr_str, self.state)
+            addr = optimize_expr(addr, self.state)
+            mem_val = self.state.mem_load(addr)
+            reg_val = self.state.read_reg(reg)
+            new_val = BinOp(sym_op, reg_val, mem_val)
+            var, _ = self.state.write_reg(reg, new_val)
+            logger.info(f"{var} = {new_val}")
+            return True
+
+        return False
 
     def _execute_instruction(self, line: str):
         """Execute a single instruction line."""
@@ -170,15 +248,10 @@ class SymbolicEngine:
 
         line = re.sub(r"%e([a-z0-9]+)", r"%r\1", line)
 
-        # xor[lq] %reg, %reg
-        if m := re.match(r"xor[lq]? %([a-z0-9]+), %([a-z0-9]+)", line):
-            src_reg, dst_reg = m[1], m[2]
-            src_val = self.state.read_reg(src_reg)
-            dst_val = self.state.read_reg(dst_reg)
-            new_val = BinOp("^", dst_val, src_val)
-            var, _ = self.state.write_reg(dst_reg, new_val)
-            logger.info(f"{var} = {new_val}")
-            return
+        # Try binary operations first
+        for opcode in ["add", "sub", "xor", "and", "or", "imul", "shl", "shr", "sar"]:
+            if self._handle_binary_op(opcode, line):
+                return
 
         # lea[lq] $imm, %reg
         if m := re.match(r"lea[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), %([a-z0-9]+)", line):
@@ -198,8 +271,8 @@ class SymbolicEngine:
             logger.info(f"{var} = {expr}")
             return
 
-        # mov $imm, %reg
-        if m := re.match(r"mov(?:abs)?[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), %([a-z0-9]+)", line):
+        # mov/movslq $imm, %reg
+        if m := re.match(r"mov(?:slq|abs)?[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), %([a-z0-9]+)", line):
             imm_str, reg = m[1], m[2]
             imm = int(imm_str, 16) if imm_str.startswith(
                 ('-0x', '0x')) else int(imm_str)
@@ -207,16 +280,16 @@ class SymbolicEngine:
             logger.info(f"{var} = {expr}")
             return
 
-        # mov %reg, %reg
-        if m := re.match(r"mov[lq]? %([a-z0-9]+), %([a-z0-9]+)", line):
+        # mov/movslq %reg, %reg
+        if m := re.match(r"mov(?:slq)?[lq]? %([a-z0-9]+), %([a-z0-9]+)", line):
             src_reg, dst_reg = m[1], m[2]
             src_val = self.state.read_reg(src_reg)
             var, expr = self.state.write_reg(dst_reg, src_val)
             logger.info(f"{var} = {expr}")
             return
 
-        # mov $imm, mem
-        if m := re.match(r"mov[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), (.+)", line):
+        # mov/movslq $imm, mem
+        if m := re.match(r"mov(?:slq)?[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), (.+)", line):
             imm_str, addr_str = m[1], m[2]
             imm = int(imm_str, 16) if imm_str.startswith(
                 ('-0x', '0x')) else int(imm_str)
@@ -226,8 +299,8 @@ class SymbolicEngine:
             logger.info(f"{mem_var} = {Const(imm)}")
             return
 
-        # mov %reg, mem
-        if m := re.match(r"mov[lq]? %([a-z0-9]+), (.+)", line):
+        # mov/movslq %reg, mem
+        if m := re.match(r"mov(?:slq)?[lq]? %([a-z0-9]+), (.+)", line):
             reg, addr_str = m[1], m[2]
             reg_val = self.state.read_reg(reg)
             addr = parse_address(addr_str, self.state)
@@ -236,72 +309,14 @@ class SymbolicEngine:
             logger.info(f"{mem_var} = {reg_val}")
             return
 
-        # mov mem, %reg
-        if m := re.match(r"mov[lq]? (.+), %([a-z0-9]+)", line):
+        # mov/movslq mem, %reg
+        if m := re.match(r"mov(?:slq)?[lq]? (.+), %([a-z0-9]+)", line):
             addr_str, reg = m[1], m[2]
             addr = parse_address(addr_str, self.state)
             addr = optimize_expr(addr, self.state)
             val = self.state.mem_load(addr)
             var, _ = self.state.write_reg(reg, val)
             logger.info(f"{var} = {val}")
-            return
-
-        # add $imm, %reg
-        if m := re.match(r"add[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), %([a-z0-9]+)", line):
-            imm_str, reg = m[1], m[2]
-            imm = int(imm_str, 16) if imm_str.startswith(
-                ('-0x', '0x')) else int(imm_str)
-            reg_val = self.state.read_reg(reg)
-            new_val = BinOp("+", reg_val, Const(imm))
-            var, _ = self.state.write_reg(reg, new_val)
-            logger.info(f"{var} = {new_val}")
-            return
-
-        # add %reg1, %reg2
-        if m := re.match(r"add[lq]? %([a-z0-9]+), %([a-z0-9]+)", line):
-            src_reg, dst_reg = m[1], m[2]
-            src_val = self.state.read_reg(src_reg)
-            dst_val = self.state.read_reg(dst_reg)
-            new_val = BinOp("+", dst_val, src_val)
-            var, _ = self.state.write_reg(dst_reg, new_val)
-            logger.info(f"{var} = {new_val}")
-            return
-
-        # add $imm, mem
-        if m := re.match(r"add[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), (.+)", line):
-            imm_str, addr_str = m[1], m[2]
-            imm = int(imm_str, 16) if imm_str.startswith(
-                ('-0x', '0x')) else int(imm_str)
-            addr = parse_address(addr_str, self.state)
-            addr = optimize_expr(addr, self.state)
-            old_val = self.state.mem_load(addr)
-            new_val = BinOp("+", old_val, Const(imm))
-            mem_var, _ = self.state.mem_store(addr, new_val)
-            logger.info(f"{mem_var} = {new_val}")
-            return
-
-        # add %reg, mem
-        if m := re.match(r"add[lq]? %([a-z0-9]+), (.+)", line):
-            reg, addr_str = m[1], m[2]
-            reg_val = self.state.read_reg(reg)
-            addr = parse_address(addr_str, self.state)
-            addr = optimize_expr(addr, self.state)
-            old_val = self.state.mem_load(addr)
-            new_val = BinOp("+", old_val, reg_val)
-            mem_var, _ = self.state.mem_store(addr, new_val)
-            logger.info(f"{mem_var} = {new_val}")
-            return
-
-        # add mem, %reg
-        if m := re.match(r"add[lq]? (.+), %([a-z0-9]+)", line):
-            addr_str, reg = m[1], m[2]
-            addr = parse_address(addr_str, self.state)
-            addr = optimize_expr(addr, self.state)
-            mem_val = self.state.mem_load(addr)
-            reg_val = self.state.read_reg(reg)
-            new_val = BinOp("+", reg_val, mem_val)
-            var, _ = self.state.write_reg(reg, new_val)
-            logger.info(f"{var} = {new_val}")
             return
 
         logger.warning(f"unhandled line: {line}")
