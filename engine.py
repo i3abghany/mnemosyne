@@ -322,31 +322,48 @@ class SymbolicEngine:
         logger.warning(f"unhandled line: {line}")
 
 
-def expand_expr(expr: Expr, state: SymbolicState) -> Expr:
-    if isinstance(expr, Const):
+def expand_expr(expr: Expr, state: SymbolicState, visited: set = None) -> Expr:
+    if visited is None:
+        visited = set()
+
+    expr_str = str(expr)
+    if expr_str in visited:
         return expr
 
-    if isinstance(expr, Var):
-        key = f"{expr.name}_{expr.version}"
-        if key in state.definitions:
-            return expand_expr(state.definitions[key], state)
-        else:
+    visited.add(expr_str)
+
+    try:
+        if isinstance(expr, Const):
             return expr
 
-    if isinstance(expr, BinOp):
-        left = expand_expr(expr.left, state)
-        right = expand_expr(expr.right, state)
-        return BinOp(expr.op, left, right)
+        if isinstance(expr, Var):
+            key = f"{expr.name}_{expr.version}"
+            if key in state.definitions:
+                return expand_expr(state.definitions[key], state, visited)
+            else:
+                return expr
 
-    if isinstance(expr, Mem):
-        addr = expand_expr(expr.addr, state)
-        val = state.mem.get(str(addr))
-        if val:
-            return expand_expr(val, state)
-        else:
+        if isinstance(expr, BinOp):
+            left = expand_expr(expr.left, state, visited)
+            right = expand_expr(expr.right, state, visited)
+            return BinOp(expr.op, left, right)
+
+        if isinstance(expr, Mem):
+            addr = expand_expr(expr.addr, state, visited)
+            key = str(addr)
+            if key in state.mem:
+                stored_value = state.mem[key]
+                stored_str = str(stored_value)
+                mem_ref = f"mem[{key}]"
+                if mem_ref in stored_str:
+                    return Mem(addr)
+                else:
+                    return expand_expr(stored_value, state, visited)
             return Mem(addr)
 
-    return expr
+        return expr
+    finally:
+        visited.remove(expr_str)
 
 
 def optimize_expr(expr: Expr, state: SymbolicState) -> Expr:
