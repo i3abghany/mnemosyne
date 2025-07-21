@@ -131,6 +131,7 @@ def main():
         ('test.test_engine', 'CORE ENGINE TESTS'),
         ('test.test_performance', 'PERFORMANCE AND STRESS TESTS'),
         ('test.test_address_parsing', 'ADDRESS PARSING TESTS'),
+        ('test.test_cyclic_memory_fix', 'CYCLIC MEMORY FIX TESTS'),
     ]
 
     all_results = []

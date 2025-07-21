@@ -206,7 +206,6 @@ class TestAddressParsing(unittest.TestCase):
         """Test parsing complex addressing modes."""
         # 8(%rsp,%rax,2)
         addr = parse_address("8(%rsp,%rax,2)", self.state)
-        # Should be ((rsp + (rax * 2)) + 8) - order may vary due to implementation
         addr_str = str(addr)
         self.assertIn("rsp_1", addr_str)
         self.assertIn("rax_1", addr_str)
@@ -394,9 +393,82 @@ class TestExpressionExpansion(unittest.TestCase):
         expanded = expand_expr(mem_expr, self.state)
         self.assertIsInstance(expanded, Mem)
 
+    def test_expand_cyclic_memory_reference(self):
+        """Test expanding memory expressions that reference themselves (cyclic references)."""
+        addr = Var("rsp", 0)  # rsp_0
+        mem_expr = Mem(addr)
+        
+        cyclic_value = BinOp("+", mem_expr, Const(1))  # (mem[rsp_0] + 1)
+        self.state.mem_store(addr, cyclic_value)
+        
+        expanded = expand_expr(mem_expr, self.state)
+        self.assertIsInstance(expanded, Mem)
+        self.assertEqual(str(expanded), "mem[rsp_0]")
+
+    def test_expand_complex_cyclic_memory_chain(self):
+        """Test expanding indirect cyclic memory references."""
+        addr1 = Const(0x1000)
+        addr2 = Const(0x2000)
+        
+        mem1 = Mem(addr1)
+        mem2 = Mem(addr2)
+        
+        self.state.mem_store(addr1, BinOp("+", mem2, Const(1)))  # mem[0x1000] = (mem[0x2000] + 1)
+        self.state.mem_store(addr2, BinOp("+", mem1, Const(2)))  # mem[0x2000] = (mem[0x1000] + 2)
+        
+        expanded1 = expand_expr(mem1, self.state)
+        expanded2 = expand_expr(mem2, self.state)
+        
+        self.assertIsNotNone(expanded1)
+        self.assertIsNotNone(expanded2)
+
+    def test_expand_non_cyclic_memory_with_memory_references(self):
+        """Test that non-cyclic memory references still expand correctly."""
+        addr1 = Const(0x1000)
+        addr2 = Const(0x2000)
+        
+        self.state.mem_store(addr1, Const(100))
+        self.state.mem_store(addr2, BinOp("+", Mem(addr1), Const(50)))
+        
+        mem2_expr = Mem(addr2)
+        expanded = expand_expr(mem2_expr, self.state)
+        
+        self.assertIsInstance(expanded, BinOp)
+        self.assertEqual(expanded.op, "+")
+        self.assertIsInstance(expanded.left, Const)
+        self.assertEqual(expanded.left.value, 100)
+        self.assertIsInstance(expanded.right, Const)
+        self.assertEqual(expanded.right.value, 50)
+
+    def test_expand_memory_with_symbolic_address(self):
+        rsp_var = Var("rsp", 0)  # rsp_0
+        mem_rsp = Mem(rsp_var)   # mem[rsp_0]
+        
+        cyclic_expr = BinOp("+", mem_rsp, Const(1))
+        self.state.mem_store(rsp_var, cyclic_expr)
+        
+        expanded = expand_expr(mem_rsp, self.state)
+        self.assertIsInstance(expanded, Mem)
+        self.assertEqual(str(expanded.addr), "rsp_0")
+
+    def test_expand_deeply_nested_non_cyclic(self):
+        addr1 = Const(0x1000)
+        addr2 = Const(0x2000) 
+        addr3 = Const(0x3000)
+        
+        self.state.mem_store(addr1, Const(5))
+        self.state.mem_store(addr2, BinOp("+", Mem(addr1), Const(1)))
+        self.state.mem_store(addr3, BinOp("*", Mem(addr2), Const(2)))
+        
+        expanded = expand_expr(Mem(addr3), self.state)
+        self.assertIsInstance(expanded, BinOp)
+        self.assertEqual(expanded.op, "*")
+        
+        self.assertIsInstance(expanded.left, BinOp)
+        self.assertEqual(expanded.left.op, "+")
+
 
 class TestExpressionOptimization(unittest.TestCase):
-    """Test expression optimization and simplification."""
 
     def setUp(self):
         """Set up symbolic state."""
@@ -479,13 +551,11 @@ class TestExpressionOptimization(unittest.TestCase):
 
     def test_complex_constant_collection(self):
         """Test collection of constants in addition chains."""
-        # (x + 5) + 10 should become x + 15
         var = Var("rax", 1)
         inner = BinOp("+", var, Const(5))
         outer = BinOp("+", inner, Const(10))
 
         optimized = optimize_expr(outer, self.state)
-        # Result structure may vary, but should contain the variable and 15
         opt_str = str(optimized)
         self.assertIn("rax_1", opt_str)
         self.assertIn("15", opt_str)
@@ -560,23 +630,19 @@ class TestIntegration(unittest.TestCase):
         engine = SymbolicEngine(state)
         engine.parse_trace_and_execute(trace)
 
-        # The memory should contain the updated value
         addr_str = str(Var("rsp", 0))
         self.assertIn(addr_str, state.mem)
 
-        # The register should load from memory
         final_rax = state.current_var("rax")
         expanded = expand_expr(final_rax, state)
-        # Should be some expression representing the memory load
 
     def test_file_based_trace(self):
         """Test execution from a temporary trace file."""
-        # Create a temporary trace file
         trace_content = """
-400500: mov $42, %rax
-400505: mov $8, %rbx  
-40050a: add %rbx, %rax
-40050f: mov %rax, (%rsp)
+0x400500: mov $42, %rax
+0x400505: mov $8, %rbx  
+0x40050a: add %rbx, %rax
+0x40050f: mov %rax, (%rsp)
         """.strip()
 
         with tempfile.NamedTemporaryFile(mode='w', suffix='.log', delete=False) as f:
@@ -584,7 +650,6 @@ class TestIntegration(unittest.TestCase):
             temp_file = f.name
 
         try:
-            # Read and process the trace like the main function does
             with open(temp_file, 'r') as f:
                 trace = f.readlines()
             trace = [line.strip() for line in trace if line.strip()]
@@ -595,12 +660,95 @@ class TestIntegration(unittest.TestCase):
             engine = SymbolicEngine(state)
             engine.parse_trace_and_execute(trace)
 
-            # Verify execution
             self.assertIn("rax_2", state.definitions)
             self.assertGreater(len(state.mem), 0)
 
         finally:
             os.unlink(temp_file)
+
+    def test_cyclic_memory_trace_execution(self):
+        """Test the specific trace that was causing infinite recursion."""
+        state = SymbolicState()
+        engine = SymbolicEngine(state)
+
+        trace = [
+            "add $1, (%rsp)",    # mem[rsp_0] = (mem[rsp_0] + 1) - creates cycle
+            "mov (%rsp), %rax",  # rax_1 = (mem[rsp_0] + 1)
+            "mov (%rsp), %rax",  # rax_2 = (mem[rsp_0] + 1)
+        ]
+
+        # This should NOT cause infinite recursion
+        engine.parse_trace_and_execute(trace)
+
+        final_rax = state.current_var("rax")
+        self.assertEqual(str(final_rax), "rax_2")
+
+        expanded = expand_expr(final_rax, state)
+        self.assertIsInstance(expanded, BinOp)
+        self.assertEqual(expanded.op, "+")
+        self.assertIsInstance(expanded.left, Mem)
+        self.assertEqual(str(expanded.left), "mem[rsp_0]")
+        self.assertIsInstance(expanded.right, Const)
+        self.assertEqual(expanded.right.value, 1)
+
+        optimized = optimize_expr(expanded, state)
+        self.assertIsInstance(optimized, BinOp)
+
+    def test_multiple_cyclic_memory_operations(self):
+        """Test multiple memory operations that could create cycles."""
+        state = SymbolicState()
+        engine = SymbolicEngine(state)
+
+        trace = [
+            "mov $10, (%rsp)",      # mem[rsp_0] = 10
+            "add $5, (%rsp)",       # mem[rsp_0] = (mem[rsp_0] + 5) = (10 + 5)
+            "add (%rsp), %rax",     # rax_1 = (rax_0 + mem[rsp_0]) = (rax_0 + (10 + 5))
+            "mov %rax, 8(%rsp)",    # mem[(8 + rsp_0)] = rax_1
+            "mov 8(%rsp), %rbx",    # rbx_1 = rax_1 - load stored value
+            "add %rbx, %rax",       # rax_2 = (rax_1 + rbx_1) - more complex expression
+        ]
+
+        engine.parse_trace_and_execute(trace)
+
+        self.assertIn("rax_1", state.definitions)
+        self.assertGreater(len(state.mem), 1)
+
+        final_rax = state.current_var("rax")
+        expanded_rax = expand_expr(final_rax, state)
+        self.assertIsNotNone(expanded_rax)
+
+    def test_nested_memory_references_without_cycles(self):
+        """Test complex nested memory references that don't form cycles."""
+        state = SymbolicState()
+        engine = SymbolicEngine(state)
+
+        trace = [
+            "mov $100, (%rsp)",        # mem[rsp_0] = 100
+            "mov $200, 8(%rsp)",       # mem[(8 + rsp_0)] = 200
+            "mov (%rsp), %rax",        # rax_1 = 100
+            "add 8(%rsp), %rax",       # rax_2 = (rax_1 + 200) = (100 + 200)
+            "mov %rax, 16(%rsp)",      # mem[(16 + rsp_0)] = rax_2 = (100 + 200)
+            "mov 16(%rsp), %rbx",      # rbx_1 = (100 + 200)
+        ]
+
+        engine.parse_trace_and_execute(trace)
+
+        final_rax = state.current_var("rax")
+        final_rbx = state.current_var("rbx")
+
+        expanded_rax = expand_expr(final_rax, state)
+        expanded_rbx = expand_expr(final_rbx, state)
+
+        self.assertIsInstance(expanded_rax, BinOp)
+        self.assertIsInstance(expanded_rbx, BinOp)
+        
+        optimized_rax = optimize_expr(expanded_rax, state)
+        optimized_rbx = optimize_expr(expanded_rbx, state)
+        
+        self.assertIsInstance(optimized_rax, Const)
+        self.assertIsInstance(optimized_rbx, Const)
+        self.assertEqual(optimized_rax.value, 300)
+        self.assertEqual(optimized_rbx.value, 300)
 
 
 class TestErrorHandling(unittest.TestCase):
@@ -611,7 +759,6 @@ class TestErrorHandling(unittest.TestCase):
         state = SymbolicState()
         trace = ["invalid instruction format"]
 
-        # Should not crash, just log warnings
         engine = SymbolicEngine(state)
         engine.parse_trace_and_execute(trace)
         self.assertEqual(len(state.reg_versions), 0)
@@ -629,7 +776,6 @@ class TestErrorHandling(unittest.TestCase):
         engine = SymbolicEngine(state)
         engine.parse_trace_and_execute([])
 
-        # Should not crash and state should be minimal
         self.assertEqual(len(state.reg_versions), 0)
         self.assertEqual(len(state.mem), 0)
 
