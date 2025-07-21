@@ -1,5 +1,7 @@
 # Mnemosyne
 
+![Mnemosyne Logo](mnemosyne.png)
+
 A trace-based symbolic execution engine for x86-64 assembly.
 
 ## Usage
