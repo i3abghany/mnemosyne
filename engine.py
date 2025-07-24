@@ -149,7 +149,7 @@ def build_memory_address(mem_operand, state: SymbolicState) -> Expr:
     return addr
 
 
-def operand_to_expr(operand, instruction, state: SymbolicState) -> Expr:
+def operand_to_expr(operand, state: SymbolicState) -> Expr:
     if operand.type == OperandType.REG:
         reg_name = operand.reg
         reg_name = normalize_register_name(reg_name)
@@ -168,14 +168,14 @@ def operand_to_expr(operand, instruction, state: SymbolicState) -> Expr:
         raise ValueError(f"Unsupported operand type: {operand.type}")
 
 
-def operand_to_lvalue(operand, instruction, state: SymbolicState) -> tuple:
+def operand_to_lvalue(operand, state: SymbolicState) -> tuple:
     if operand.type == OperandType.REG:
         reg_name = operand.reg
         reg_name = normalize_register_name(reg_name)
         return ('reg', reg_name)
 
     elif operand.type == OperandType.MEM:
-        addr_expr = operand_to_expr(operand, instruction, state)
+        addr_expr = operand_to_expr(operand, state)
         return ('mem', addr_expr)
 
     else:
@@ -207,11 +207,11 @@ class SymbolicEngine:
         try:
             # MOV instructions
             if mnemonic.startswith('mov'):
-                self._handle_mov(instruction, operands)
+                self._handle_mov(operands)
 
             # LEA instructions
             elif mnemonic.startswith('lea'):
-                self._handle_lea(instruction, operands)
+                self._handle_lea(operands)
 
             # Arithmetic instructions
             elif mnemonic.startswith(('add', 'sub', 'xor', 'and', 'or', 'imul', 'shl', 'shr', 'sar')):
@@ -223,7 +223,7 @@ class SymbolicEngine:
         except Exception as e:
             logger.error(f"Error executing {mnemonic}: {e}")
 
-    def _handle_mov(self, instruction, operands):
+    def _handle_mov(self, operands):
         if len(operands) != 2:
             logger.warning(f"MOV with {len(operands)} operands")
             return
@@ -236,11 +236,11 @@ class SymbolicEngine:
             addr = optimize_expr(addr, self.state)
             src_expr = self.state.mem_load(addr)
         else:
-            src_expr = operand_to_expr(src_operand, instruction, self.state)
+            src_expr = operand_to_expr(src_operand, self.state)
 
         # Get destination
         dst_type, dst_id = operand_to_lvalue(
-            dst_operand, instruction, self.state)
+            dst_operand, self.state)
 
         if dst_type == 'reg':
             var, _ = self.state.write_reg(dst_id, src_expr)
@@ -254,7 +254,7 @@ class SymbolicEngine:
             mem_var, _ = self.state.mem_store(addr, src_expr)
             logger.info(f"{mem_var} = {src_expr}")
 
-    def _handle_lea(self, instruction, operands):
+    def _handle_lea(self, operands):
         if len(operands) != 2:
             logger.warning(f"LEA with {len(operands)} operands")
             return
@@ -272,8 +272,7 @@ class SymbolicEngine:
             return
 
         # Get destination
-        dst_type, dst_id = operand_to_lvalue(
-            dst_operand, instruction, self.state)
+        dst_type, dst_id = operand_to_lvalue(dst_operand, self.state)
 
         if dst_type == 'reg':
             addr_expr = optimize_expr(addr_expr, self.state)
@@ -283,7 +282,6 @@ class SymbolicEngine:
             logger.warning("LEA to memory not supported")
 
     def _handle_arithmetic(self, instruction, operands):
-        """Handle arithmetic instructions using Capstone operands."""
         if len(operands) != 2:
             logger.warning(
                 f"{instruction.mnemonic} with {len(operands)} operands")
@@ -312,17 +310,14 @@ class SymbolicEngine:
         sym_op = op_map[mnemonic]
 
         # Get source value
-        src_expr = operand_to_expr(
-            src_operand, instruction, self.state)
+        src_expr = operand_to_expr(src_operand, self.state)
 
         # Get destination
-        dst_type, dst_id = operand_to_lvalue(
-            dst_operand, instruction, self.state)
+        dst_type, dst_id = operand_to_lvalue(dst_operand, self.state)
 
         if dst_type == 'reg':
             # Read current value of destination register
-            dst_expr = operand_to_expr(
-                dst_operand, instruction, self.state)
+            dst_expr = operand_to_expr(dst_operand, self.state)
             new_expr = BinOp(sym_op, dst_expr, src_expr)
             var, _ = self.state.write_reg(dst_id, new_expr)
             logger.info(f"{var} = {new_expr}")
