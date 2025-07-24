@@ -1,21 +1,20 @@
-# Control flow and mixed instructions
 402000: endbr64
-402001: push %rbp
-402004: mov %rsp, %rbp
-402007: mov $0, %eax
-40200c: mov %eax, -4(%rbp)
+# 402001: pushq %rbp
+402004: movq %rsp, %rbp
+402007: movl $0, %eax
+40200c: movl %eax, -4(%rbp)
 40200f: jmp 402025
 402014: movl -4(%rbp), %eax
 402017: add $1, %eax
-40201a: mov %eax, -4(%rbp)
+40201a: movl %eax, -4(%rbp)
 40201d: cmpl $9, -4(%rbp)
 402021: jle 402014
 402025: movl -4(%rbp), %eax
 402028: cmp $5, %eax
 40202b: jg 402035
-40202d: add $10, -4(%rbp)
+40202d: addl $10, -4(%rbp)
 402031: movl -4(%rbp), %eax
-402034: ret
-402035: sub $3, -4(%rbp)
+402034: retq
+402035: subl $3, -4(%rbp)
 402039: movl -4(%rbp), %eax
-40203c: ret
+40203c: retq

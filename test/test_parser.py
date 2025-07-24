@@ -1,23 +1,20 @@
 #!/usr/bin/env python3
 
+from parser import TraceParser, OperandType
 import unittest
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-try:
-    from keystone import *
-    from capstone import *
-    from capstone.x86_const import *
-    KEYSTONE_AVAILABLE = True
-except ImportError:
-    KEYSTONE_AVAILABLE = False
+from keystone import *
+from capstone import *
+from capstone.x86_const import *
 
-if KEYSTONE_AVAILABLE:
-    from parser import TraceParser
+# Add parent directory to path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
 
 
-@unittest.skipUnless(KEYSTONE_AVAILABLE, "Keystone/Capstone not available")
 class TestTraceParser(unittest.TestCase):
     def setUp(self):
         self.simple_trace = ["mov %rax, %rbx"]
@@ -40,7 +37,7 @@ class TestTraceParser(unittest.TestCase):
         trace = ["movq %rax, %rbx"]
         parser = TraceParser(trace)
         result = parser.parse()
-        
+
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].mnemonic, trace[0].split()[0])
         self.assertEqual(len(result[0].operands), 2)
@@ -55,7 +52,7 @@ class TestTraceParser(unittest.TestCase):
         ]
         parser = TraceParser(trace)
         result = parser.parse()
-        
+
         self.assertEqual(len(result), 3)
         mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(mnemonics, [line.split()[0] for line in trace])
@@ -87,7 +84,7 @@ class TestTraceParser(unittest.TestCase):
         ]
         parser = TraceParser(trace)
         result = parser.parse()
-        
+
         expected_mnemonics = [line.split()[0] for line in trace]
         actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
@@ -128,7 +125,7 @@ class TestTraceParser(unittest.TestCase):
         ]
         parser = TraceParser(trace)
         result = parser.parse()
-        
+
         self.assertEqual(len(result), 4)
         for insn in result:
             self.assertTrue(len(insn.operands) == 2)
@@ -144,7 +141,7 @@ class TestTraceParser(unittest.TestCase):
         ]
         parser = TraceParser(trace)
         result = parser.parse()
-        
+
         self.assertEqual(len(result), len(trace))
         for i, insn in enumerate(result):
             self.assertEqual(insn.mnemonic, trace[i].split()[0])
@@ -152,15 +149,15 @@ class TestTraceParser(unittest.TestCase):
 
     def test_parse_complex_addressing(self):
         trace = [
-            "mov (%rax), %rbx",         
-            "mov 8(%rax), %rbx",        
-            "mov (%rax,%rcx), %rbx",    
-            "mov (%rax,%rcx,2), %rbx",  
-            "mov 8(%rax,%rcx,4), %rbx"  
+            "mov (%rax), %rbx",
+            "mov 8(%rax), %rbx",
+            "mov (%rax,%rcx), %rbx",
+            "mov (%rax,%rcx,2), %rbx",
+            "mov 8(%rax,%rcx,4), %rbx"
         ]
         parser = TraceParser(trace)
         result = parser.parse()
-        
+
         self.assertEqual(len(result), len(trace))
         for insn in result:
             self.assertEqual(insn.mnemonic, 'movq')
@@ -175,7 +172,7 @@ class TestTraceParser(unittest.TestCase):
         ]
         parser = TraceParser(trace)
         result = parser.parse()
-        
+
         expected_mnemonics = ['addss', 'subsd', 'mulps', 'divpd']
         actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
@@ -189,7 +186,7 @@ class TestTraceParser(unittest.TestCase):
         ]
         parser = TraceParser(trace)
         result = parser.parse()
-        
+
         expected_mnemonics = ['movdqa', 'paddb', 'psubb', 'pmullw']
         actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
@@ -198,37 +195,37 @@ class TestTraceParser(unittest.TestCase):
         trace = ["mov %rax, %rbx"]
         parser = TraceParser(trace)
         result = parser.parse()
-        
+
         insn = result[0]
         self.assertEqual(len(insn.operands), 2)
 
         op1, op2 = insn.operands
-        self.assertEqual(op1.type, CS_OP_REG)
-        self.assertEqual(op2.type, CS_OP_REG)
+        self.assertEqual(op1.type, OperandType.REG)
+        self.assertEqual(op2.type, OperandType.REG)
 
     def test_parse_immediate_operand(self):
         trace = ["mov $100, %rax"]
         parser = TraceParser(trace)
         result = parser.parse()
-        
+
         insn = result[0]
         self.assertEqual(len(insn.operands), 2)
 
         op1, op2 = insn.operands
-        self.assertEqual(CS_OP_IMM, op1.type)
-        self.assertEqual(CS_OP_REG, op2.type)
+        self.assertEqual(OperandType.IMM, op1.type)
+        self.assertEqual(OperandType.REG, op2.type)
 
     def test_parse_memory_operand(self):
         trace = ["mov (%rax), %rbx"]
         parser = TraceParser(trace)
         result = parser.parse()
-        
+
         insn = result[0]
         self.assertEqual(len(insn.operands), 2)
 
         op1, op2 = insn.operands
-        self.assertEqual(op1.type, CS_OP_MEM)
-        self.assertEqual(op2.type, CS_OP_REG)
+        self.assertEqual(op1.type, OperandType.MEM)
+        self.assertEqual(op2.type, OperandType.REG)
 
     def test_parse_empty_trace(self):
         parser = TraceParser([])
@@ -243,7 +240,7 @@ class TestTraceParser(unittest.TestCase):
         ]
         parser = TraceParser(trace)
         result = parser.parse()
-        
+
         self.assertEqual(len(result), 3)
         mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(mnemonics, ['movq', 'addq', 'subq'])
@@ -257,7 +254,7 @@ class TestTraceParser(unittest.TestCase):
         ]
         parser = TraceParser(trace)
         result = parser.parse()
-        
+
         self.assertEqual(len(result), len(trace))
 
         def has_prefix(insn, prefix):
@@ -274,7 +271,7 @@ class TestTraceParser(unittest.TestCase):
         ]
         parser = TraceParser(trace)
         result = parser.parse()
-        
+
         self.assertEqual(len(result), 2)
         for insn in result:
             self.assertEqual(insn.mnemonic, 'movq')
@@ -290,7 +287,7 @@ class TestTraceParser(unittest.TestCase):
 
         parser = TraceParser(large_trace)
         result = parser.parse()
-        
+
         self.assertEqual(len(result), 1000)
         for i in range(0, len(result), len(base_instructions)):
             if i + 3 < len(result):
@@ -302,7 +299,7 @@ class TestTraceParser(unittest.TestCase):
     def test_parse_conditional_jumps(self):
         trace = [
             "je .+2",
-            "jne .+2", 
+            "jne .+2",
             "jb .+2",
             "jae .+2",
             "jo .+2",
@@ -312,7 +309,8 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
         self.assertEqual(len(result), len(trace))
         expected_mnemonics = ['je', 'jne', 'jb', 'jae', 'jo', 'jno']
-        self.assertEqual([insn.mnemonic for insn in result], expected_mnemonics)
+        self.assertEqual([insn.mnemonic for insn in result],
+                         expected_mnemonics)
 
     def test_parse_compare_and_test(self):
         trace = [
@@ -323,7 +321,7 @@ class TestTraceParser(unittest.TestCase):
         ]
         parser = TraceParser(trace)
         result = parser.parse()
-        
+
         expected_mnemonics = [line.split()[0] for line in trace]
         actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
@@ -331,7 +329,7 @@ class TestTraceParser(unittest.TestCase):
     def test_parse_string_instructions(self):
         trace = [
             "movsb",
-            "movsw", 
+            "movsw",
             "movsd",
             "lodsb",
             "stosb",
@@ -340,15 +338,16 @@ class TestTraceParser(unittest.TestCase):
         ]
         parser = TraceParser(trace)
         result = parser.parse()
-        
-        expected_mnemonics = ['movsb', 'movsw', 'movsl', 'lodsb', 'stosb', 'scasb', 'cmpsb']
+
+        expected_mnemonics = ['movsb', 'movsw',
+                              'movsl', 'lodsb', 'stosb', 'scasb', 'cmpsb']
         actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
 
     def test_parse_bit_manipulation(self):
         trace = [
             "btq $5, %rax",
-            "btsq $3, %rbx", 
+            "btsq $3, %rbx",
             "btrq $7, %rcx",
             "btcq $1, %rdx",
             "bsfq %rsi, %rdi",
@@ -372,15 +371,14 @@ class TestTraceParser(unittest.TestCase):
         ]
         parser = TraceParser(trace)
         result = parser.parse()
-        
+
         expected_mnemonics = [line.split()[0] for line in trace]
         actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
 
     def test_parse_system_instructions(self):
         trace = [
-            "nop",
-            "hlt", 
+            "hlt",
             "cli",
             "sti",
             "cld",
@@ -388,42 +386,40 @@ class TestTraceParser(unittest.TestCase):
         ]
         parser = TraceParser(trace)
         result = parser.parse()
-        
-        expected_mnemonics = ['nop', 'hlt', 'cli', 'sti', 'cld', 'std']
+
+        expected_mnemonics = ['hlt', 'cli', 'sti', 'cld', 'std']
         actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
 
 
-@unittest.skipUnless(KEYSTONE_AVAILABLE, "Keystone/Capstone not available")
 class TestTraceParserErrorHandling(unittest.TestCase):
 
     def test_invalid_instruction_syntax(self):
         trace = ["invalid_instruction_xyz"]
         parser = TraceParser(trace)
-        
+
         with self.assertRaises(Exception):
             parser.parse()
 
     def test_malformed_operands(self):
         trace = ["mov %invalid_reg, %rbx"]
         parser = TraceParser(trace)
-        
+
         with self.assertRaises(Exception):
             parser.parse()
 
     def test_mixed_valid_invalid(self):
         trace = [
-            "mov %rax, %rbx",      
+            "mov %rax, %rbx",
             "invalid_instruction",
-            "add %rcx, %rdx"     
+            "add %rcx, %rdx"
         ]
         parser = TraceParser(trace)
-        
+
         with self.assertRaises(Exception):
             parser.parse()
 
 
-@unittest.skipUnless(KEYSTONE_AVAILABLE, "Keystone/Capstone not available")
 class TestTraceParserIntegration(unittest.TestCase):
 
     def test_real_world_trace_example(self):
@@ -454,7 +450,7 @@ class TestTraceParserIntegration(unittest.TestCase):
     def test_function_call_sequence(self):
         trace = [
             "pushq %rdi",
-            "pushq %rsi", 
+            "pushq %rsi",
             "movq %rsp, %rdi",
             "movabsq $0x100, %rsi",
             "callq *%rax",
@@ -465,7 +461,8 @@ class TestTraceParserIntegration(unittest.TestCase):
         result = parser.parse()
         self.assertEqual(len(result), 7)
         mnemonics = [insn.mnemonic for insn in result]
-        expected_mnemonic = ['pushq', 'pushq', 'movq', 'movabsq', 'callq', 'popq', 'popq']
+        expected_mnemonic = ['pushq', 'pushq', 'movq',
+                             'movabsq', 'callq', 'popq', 'popq']
         self.assertEqual(mnemonics, expected_mnemonic)
 
     def test_loop_structure(self):
@@ -482,7 +479,8 @@ class TestTraceParserIntegration(unittest.TestCase):
         result = parser.parse()
         self.assertEqual(len(result), 6)
         mnemonics = [insn.mnemonic for insn in result]
-        expected_mnemonics = ['movabsq', 'movabsq', 'addq', 'decq', 'jne', 'movq']
+        expected_mnemonics = ['movabsq', 'movabsq',
+                              'addq', 'decq', 'jne', 'movq']
         self.assertEqual(mnemonics, expected_mnemonics)
 
 

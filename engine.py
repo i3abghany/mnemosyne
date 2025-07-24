@@ -1,7 +1,15 @@
 from dataclasses import dataclass
+import sys
 from typing import Union, List
 import logging
 import re
+import os
+
+from keystone import *
+from capstone import *
+from capstone.x86_const import *
+
+from parser import TraceParser, OperandType, Operand, Instruction
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -90,233 +98,300 @@ class SymbolicState:
         return mem_var, value
 
     def mem_load(self, addr_expr: Expr) -> Expr:
-        return self.mem.get(str(addr_expr), Mem(addr_expr))
+        key = str(addr_expr)
+        if key in self.mem:
+            # Return the latest version of this memory location
+            name = f"mem[{key}]"
+            version = self.reg_versions.get(name, 0)
+            if version > 0:
+                return Var(name, version)
+        return Mem(addr_expr)
 
 
-def parse_address(addr_str: str, state: SymbolicState):
-    # Pattern: optional_displacement(base_reg, index_reg, scale)
-    pattern = r"(?P<disp>[-+]?(?:0x[0-9a-f]+|\d+))?\s*\(\s*(?P<base>%[a-z0-9]+)?\s*(?:,\s*(?P<index>%[a-z0-9]+))?\s*(?:,\s*(?P<scale>[1248]))?\s*\)"
+def normalize_register_name(reg_name: str) -> str:
+    reg_map = {
+        'eax': 'rax', 'ebx': 'rbx', 'ecx': 'rcx', 'edx': 'rdx',
+        'esi': 'rsi', 'edi': 'rdi', 'esp': 'rsp', 'ebp': 'rbp',
+        'r8d': 'r8', 'r9d': 'r9', 'r10d': 'r10', 'r11d': 'r11',
+        'r12d': 'r12', 'r13d': 'r13', 'r14d': 'r14', 'r15d': 'r15'
+    }
+    return reg_map.get(reg_name, reg_name)
 
-    m = re.match(pattern, addr_str.strip())
-    if not m:
-        raise ValueError(f"Invalid address mode: {addr_str}")
 
-    components = []
+def operand_to_expr(operand, instruction, state: SymbolicState) -> Expr:
+    if operand.type == OperandType.REG:
+        reg_name = operand.reg
+        reg_name = normalize_register_name(reg_name)
+        return state.read_reg(reg_name)
 
-    if m.group("base"):
-        base_reg = m.group("base").strip('%')
-        valid_regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi",
-                      "rsp", "rbp"] + [f"r{i}" for i in range(8, 16)]
-        if base_reg not in valid_regs:
-            raise ValueError(f"Invalid register: {base_reg}")
-        base_expr = state.read_reg(base_reg)
-        components.append(base_expr)
+    elif operand.type == OperandType.IMM:
+        return Const(operand.imm)
 
-    if m.group("index"):
-        index_reg = m.group("index").strip('%')
-        valid_regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi",
-                      "rsp", "rbp"] + [f"r{i}" for i in range(8, 16)]
-        if index_reg not in valid_regs:
-            raise ValueError(f"Invalid register: {index_reg}")
-        index_expr = state.read_reg(index_reg)
-        if m.group("scale"):
-            index_expr = BinOp("*", index_expr, Const(int(m.group("scale"))))
-        components.append(index_expr)
+    elif operand.type == OperandType.MEM:
+        components = []
 
-    if m.group("disp"):
-        disp = m.group("disp")
-        disp_val = int(disp, 16) if disp.startswith(
-            ("0x", "-0x")) else int(disp)
-        components.append(Const(disp_val))
+        # Base register
+        if operand.mem['base']:
+            base_name = operand.mem['base']
+            base_name = normalize_register_name(base_name)
+            base_expr = state.read_reg(base_name)
+            components.append(base_expr)
 
-    if not components:
-        raise ValueError("Empty address expression")
+        if operand.mem['disp'] != 0:
+            components.append(Const(operand.mem['disp']))
 
-    addr = components[0]
-    for component in components[1:]:
-        addr = BinOp("+", addr, component)
+        # Index register with scale
+        if operand.mem['index']:
+            index_name = operand.mem['index']
+            index_name = normalize_register_name(index_name)
+            index_expr = state.read_reg(index_name)
+            if operand.mem['scale'] is not None and operand.mem['scale'] > 1:
+                index_expr = BinOp(
+                    "*", index_expr, Const(operand.mem['scale']))
+            components.append(index_expr)
 
-    # Always ensure result is a BinOp for consistency
-    if isinstance(addr, Var):
-        addr = BinOp("+", addr, Const(0))
-    elif isinstance(addr, Const):
-        # For displacement-only addressing
-        addr = BinOp("+", addr, Const(0))
+        if not components:
+            return Const(0)
 
-    return addr
+        addr = components[0]
+        for component in components[1:]:
+            addr = BinOp("+", addr, component)
+
+        if isinstance(addr, Mem):
+            return addr
+        return Mem(addr)
+
+    else:
+        raise ValueError(f"Unsupported operand type: {operand.type}")
+
+
+def operand_to_lvalue(operand, instruction, state: SymbolicState) -> tuple:
+    if operand.type == OperandType.REG:
+        reg_name = operand.reg
+        reg_name = normalize_register_name(reg_name)
+        return ('reg', reg_name)
+
+    elif operand.type == OperandType.MEM:
+        addr_expr = operand_to_expr(operand, instruction, state)
+        return ('mem', addr_expr)
+
+    else:
+        raise ValueError(f"Cannot write to operand type: {operand.type}")
 
 
 class SymbolicEngine:
     def __init__(self, state: SymbolicState = None):
         self.state = state or SymbolicState()
+        self.parser = None
 
     def parse_trace_and_execute(self, trace: List[str]):
-        for line in trace:
-            self._execute_instruction(line)
+        parsed_instructions = self.parser = TraceParser(trace).parse()
+        for instruction in parsed_instructions:
+            self._execute_instruction(instruction)
 
-    def _handle_binary_op(self, opcode: str, line: str) -> bool:
-        # Map opcodes to their symbolic operators
+    def _execute_instruction(self, instruction):
+        mnemonic = instruction.mnemonic
+        operands = instruction.operands
+
+        if mnemonic in ['retq', 'cltq']:
+            logger.debug(f"Skipping: {mnemonic}")
+            return
+
+        if mnemonic.startswith(('cmp', 'test', 'j')):
+            logger.debug(f"Skipping: {mnemonic}")
+            return
+
+        try:
+            # MOV instructions
+            if mnemonic.startswith('mov'):
+                self._handle_mov(instruction, operands)
+
+            # LEA instructions
+            elif mnemonic.startswith('lea'):
+                self._handle_lea(instruction, operands)
+
+            # Arithmetic instructions
+            elif mnemonic.startswith(('add', 'sub', 'xor', 'and', 'or', 'imul', 'shl', 'shr', 'sar')):
+                self._handle_arithmetic(instruction, operands)
+
+            else:
+                logger.warning(f"Unhandled instruction: {mnemonic}")
+
+        except Exception as e:
+            logger.error(f"Error executing {mnemonic}: {e}")
+
+    def _handle_mov(self, instruction, operands):
+        if len(operands) != 2:
+            logger.warning(f"MOV with {len(operands)} operands")
+            return
+
+        src_operand, dst_operand = operands
+
+        # Handle source operand - if it's memory, we need to load from it
+        if src_operand.type == OperandType.MEM:
+            # Get the address expression
+            addr_components = []
+            if src_operand.mem['base']:
+                base_name = normalize_register_name(src_operand.mem['base'])
+                base_expr = self.state.read_reg(base_name)
+                addr_components.append(base_expr)
+
+            if src_operand.mem['disp'] != 0:
+                addr_components.append(Const(src_operand.mem['disp']))
+
+            if src_operand.mem['index']:
+                index_name = normalize_register_name(src_operand.mem['index'])
+                index_expr = self.state.read_reg(index_name)
+                if src_operand.mem['scale'] is not None:
+                    if src_operand.mem['scale'] > 1:
+                        index_expr = BinOp(
+                            "*", index_expr, Const(src_operand.mem['scale']))
+                addr_components.append(index_expr)
+
+            if not addr_components:
+                addr = Const(0)
+            else:
+                addr = addr_components[0]
+                for component in addr_components[1:]:
+                    addr = BinOp("+", addr, component)
+
+            addr = optimize_expr(addr, self.state)
+            src_expr = self.state.mem_load(addr)
+        else:
+            src_expr = operand_to_expr(
+                src_operand, instruction, self.state)
+
+        # Get destination
+        dst_type, dst_id = operand_to_lvalue(
+            dst_operand, instruction, self.state)
+
+        if dst_type == 'reg':
+            var, _ = self.state.write_reg(dst_id, src_expr)
+            logger.info(f"{var} = {src_expr}")
+        elif dst_type == 'mem':
+            # dst_id is a Mem(addr) object, we need just the address
+            if isinstance(dst_id, Mem):
+                addr = optimize_expr(dst_id.addr, self.state)
+            else:
+                addr = optimize_expr(dst_id, self.state)
+            mem_var, _ = self.state.mem_store(addr, src_expr)
+            logger.info(f"{mem_var} = {src_expr}")
+
+    def _handle_lea(self, instruction, operands):
+        if len(operands) != 2:
+            logger.warning(f"LEA with {len(operands)} operands")
+            return
+
+        src_operand, dst_operand = operands
+
+        # For LEA, we want the address itself, not the memory content
+        if src_operand.type == CS_OP_MEM:
+            components = []
+
+            # Base register
+            if src_operand.mem.base != 0:
+                base_name = instruction.reg_name(src_operand.mem.base)
+                base_name = normalize_register_name(base_name)
+                base_expr = self.state.read_reg(base_name)
+                components.append(base_expr)
+
+            # Index register with scale
+            if src_operand.mem.index != 0:
+                index_name = instruction.reg_name(src_operand.mem.index)
+                index_name = normalize_register_name(index_name)
+                index_expr = self.state.read_reg(index_name)
+                if src_operand.mem.scale is not None and src_operand.mem.scale > 1:
+                    index_expr = BinOp(
+                        "*", index_expr, Const(src_operand.mem.scale))
+                components.append(index_expr)
+
+            # Displacement
+            if src_operand.mem.disp != 0:
+                components.append(Const(src_operand.mem.disp))
+
+            if not components:
+                addr_expr = Const(0)
+            else:
+                addr_expr = components[0]
+                for component in components[1:]:
+                    addr_expr = BinOp("+", addr_expr, component)
+
+        elif src_operand.type == CS_OP_IMM:
+            addr_expr = Const(src_operand.imm)
+        else:
+            logger.warning(
+                f"Unexpected LEA source operand type: {src_operand.type}")
+            return
+
+        # Get destination
+        dst_type, dst_id = operand_to_lvalue(
+            dst_operand, instruction, self.state)
+
+        if dst_type == 'reg':
+            addr_expr = optimize_expr(addr_expr, self.state)
+            var, _ = self.state.write_reg(dst_id, addr_expr)
+            logger.info(f"{var} = {addr_expr}")
+        else:
+            logger.warning("LEA to memory not supported")
+
+    def _handle_arithmetic(self, instruction, operands):
+        """Handle arithmetic instructions using Capstone operands."""
+        if len(operands) != 2:
+            logger.warning(
+                f"{instruction.mnemonic} with {len(operands)} operands")
+            return
+
+        src_operand, dst_operand = operands
+        mnemonic = instruction.mnemonic
+
+        # Map mnemonics to operators
         op_map = {
-            "add": "+",
-            "sub": "-",
-            "xor": "^",
-            "and": "&",
-            "or": "|",
-            "shl": "<<",
-            "shr": ">>",
-            "sar": ">>",
-            "imul": "*"
+            'addq': '+', 'addl': '+',
+            'subq': '-', 'subl': '-',
+            'xorq': '^', 'xorl': '^',
+            'andq': '&', 'andl': '&',
+            'orq': '|', 'orl': '|',
+            'shlq': '<<', 'shll': '<<',
+            'shrq': '>>', 'shrl': '>>',
+            'sarq': '>>', 'sarl': '>>',
+            'imulq': '*', 'imull': '*'
         }
 
-        if opcode not in op_map:
-            return False
+        if mnemonic not in op_map:
+            logger.warning(f"Unknown arithmetic operation: {mnemonic}")
+            return
 
-        sym_op = op_map[opcode]
+        sym_op = op_map[mnemonic]
 
-        # Pattern 1: opcode $imm, %reg
-        if m := re.match(rf"{opcode}[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), %([a-z0-9]+)", line):
-            imm_str, reg = m[1], m[2]
-            imm = int(imm_str, 16) if imm_str.startswith(
-                ('-0x', '0x')) else int(imm_str)
-            reg_val = self.state.read_reg(reg)
-            new_val = BinOp(sym_op, reg_val, Const(imm))
-            var, _ = self.state.write_reg(reg, new_val)
-            logger.info(f"{var} = {new_val}")
-            return True
+        # Get source value
+        src_expr = operand_to_expr(
+            src_operand, instruction, self.state)
 
-        # Pattern 2: opcode %reg1, %reg2
-        if m := re.match(rf"{opcode}[lq]? %([a-z0-9]+), %([a-z0-9]+)", line):
-            src_reg, dst_reg = m[1], m[2]
-            src_val = self.state.read_reg(src_reg)
-            dst_val = self.state.read_reg(dst_reg)
-            new_val = BinOp(sym_op, dst_val, src_val)
-            var, _ = self.state.write_reg(dst_reg, new_val)
-            logger.info(f"{var} = {new_val}")
-            return True
+        # Get destination
+        dst_type, dst_id = operand_to_lvalue(
+            dst_operand, instruction, self.state)
 
-        # Pattern 3: opcode $imm, mem
-        if m := re.match(rf"{opcode}[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), (.+)", line):
-            imm_str, addr_str = m[1], m[2]
-            imm = int(imm_str, 16) if imm_str.startswith(
-                ('-0x', '0x')) else int(imm_str)
-            addr = parse_address(addr_str, self.state)
-            addr = optimize_expr(addr, self.state)
+        if dst_type == 'reg':
+            # Read current value of destination register
+            dst_expr = operand_to_expr(
+                dst_operand, instruction, self.state)
+            new_expr = BinOp(sym_op, dst_expr, src_expr)
+            var, _ = self.state.write_reg(dst_id, new_expr)
+            logger.info(f"{var} = {new_expr}")
+
+        elif dst_type == 'mem':
+            # Read current value from memory
+            # dst_id is a Mem(addr) object, we need just the address
+            if isinstance(dst_id, Mem):
+                addr = optimize_expr(dst_id.addr, self.state)
+            else:
+                addr = optimize_expr(dst_id, self.state)
             old_val = self.state.mem_load(addr)
-            new_val = BinOp(sym_op, old_val, Const(imm))
+            new_val = BinOp(sym_op, old_val, src_expr)
             mem_var, _ = self.state.mem_store(addr, new_val)
             logger.info(f"{mem_var} = {new_val}")
-            return True
-
-        # Pattern 4: opcode %reg, mem
-        if m := re.match(rf"{opcode}[lq]? %([a-z0-9]+), (.+)", line):
-            reg, addr_str = m[1], m[2]
-            reg_val = self.state.read_reg(reg)
-            addr = parse_address(addr_str, self.state)
-            addr = optimize_expr(addr, self.state)
-            old_val = self.state.mem_load(addr)
-            new_val = BinOp(sym_op, old_val, reg_val)
-            mem_var, _ = self.state.mem_store(addr, new_val)
-            logger.info(f"{mem_var} = {new_val}")
-            return True
-
-        # Pattern 5: opcode mem, %reg
-        if m := re.match(rf"{opcode}[lq]? (.+), %([a-z0-9]+)", line):
-            addr_str, reg = m[1], m[2]
-            addr = parse_address(addr_str, self.state)
-            addr = optimize_expr(addr, self.state)
-            mem_val = self.state.mem_load(addr)
-            reg_val = self.state.read_reg(reg)
-            new_val = BinOp(sym_op, reg_val, mem_val)
-            var, _ = self.state.write_reg(reg, new_val)
-            logger.info(f"{var} = {new_val}")
-            return True
-
-        return False
-
-    def _execute_instruction(self, line: str):
-        """Execute a single instruction line."""
-        line = line.strip()
-        if not line or line.startswith("endbr64") or line.startswith("ret") or line.startswith("nop") or line.startswith("cltq"):
-            return
-
-        if re.match(r"(cmp|test|jmp|j[a-z]+)", line):
-            logger.debug(f"skipping: {line}")
-            return
-
-        line = re.sub(r"%e([a-z0-9]+)", r"%r\1", line)
-
-        # Try binary operations first
-        for opcode in ["add", "sub", "xor", "and", "or", "imul", "shl", "shr", "sar"]:
-            if self._handle_binary_op(opcode, line):
-                return
-
-        # lea[lq] $imm, %reg
-        if m := re.match(r"lea[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), %([a-z0-9]+)", line):
-            imm_str, reg = m[1], m[2]
-            imm = int(imm_str, 16) if imm_str.startswith(
-                ('-0x', '0x')) else int(imm_str)
-            var, expr = self.state.write_reg(reg, Const(imm))
-            logger.info(f"{var} = {expr}")
-            return
-
-        # lea[lq] mem, %reg
-        if m := re.match(r"lea[lq]? (.+), %([a-z0-9]+)", line):
-            addr_str, reg = m[1], m[2]
-            addr = parse_address(addr_str, self.state)
-            addr = optimize_expr(addr, self.state)
-            var, expr = self.state.write_reg(reg, addr)
-            logger.info(f"{var} = {expr}")
-            return
-
-        # mov/movslq $imm, %reg
-        if m := re.match(r"mov(?:slq|abs)?[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), %([a-z0-9]+)", line):
-            imm_str, reg = m[1], m[2]
-            imm = int(imm_str, 16) if imm_str.startswith(
-                ('-0x', '0x')) else int(imm_str)
-            var, expr = self.state.write_reg(reg, Const(imm))
-            logger.info(f"{var} = {expr}")
-            return
-
-        # mov/movslq %reg, %reg
-        if m := re.match(r"mov(?:slq)?[lq]? %([a-z0-9]+), %([a-z0-9]+)", line):
-            src_reg, dst_reg = m[1], m[2]
-            src_val = self.state.read_reg(src_reg)
-            var, expr = self.state.write_reg(dst_reg, src_val)
-            logger.info(f"{var} = {expr}")
-            return
-
-        # mov/movslq $imm, mem
-        if m := re.match(r"mov(?:slq)?[lq]? \$(-?(?:0x[0-9a-f]+|[0-9]+)), (.+)", line):
-            imm_str, addr_str = m[1], m[2]
-            imm = int(imm_str, 16) if imm_str.startswith(
-                ('-0x', '0x')) else int(imm_str)
-            addr = parse_address(addr_str, self.state)
-            addr = optimize_expr(addr, self.state)
-            mem_var, _ = self.state.mem_store(addr, Const(imm))
-            logger.info(f"{mem_var} = {Const(imm)}")
-            return
-
-        # mov/movslq %reg, mem
-        if m := re.match(r"mov(?:slq)?[lq]? %([a-z0-9]+), (.+)", line):
-            reg, addr_str = m[1], m[2]
-            reg_val = self.state.read_reg(reg)
-            addr = parse_address(addr_str, self.state)
-            addr = optimize_expr(addr, self.state)
-            mem_var, _ = self.state.mem_store(addr, reg_val)
-            logger.info(f"{mem_var} = {reg_val}")
-            return
-
-        # mov/movslq mem, %reg
-        if m := re.match(r"mov(?:slq)?[lq]? (.+), %([a-z0-9]+)", line):
-            addr_str, reg = m[1], m[2]
-            addr = parse_address(addr_str, self.state)
-            addr = optimize_expr(addr, self.state)
-            val = self.state.mem_load(addr)
-            var, _ = self.state.write_reg(reg, val)
-            logger.info(f"{var} = {val}")
-            return
-
-        logger.warning(f"unhandled line: {line}")
+        else:
+            logger.warning(f"Unsupported destination type: {dst_type}")
 
 
 def expand_expr(expr: Expr, state: SymbolicState, visited: set = None) -> Expr:
@@ -473,8 +548,8 @@ if __name__ == "__main__":
     engine = SymbolicEngine()
     engine.parse_trace_and_execute(trace)
 
-    # Access results from the engine's state
     expr = engine.state.current_var('rax')
     expanded = expand_expr(expr, engine.state)
     optimized = optimize_expr(expanded, engine.state)
+    print(f'Expanded rax: {expanded}')
     print(f"Final rax value: {optimized}")

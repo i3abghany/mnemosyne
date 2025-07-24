@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 
+from engine import (
+    SymbolicEngine, SymbolicState,
+    expand_expr, optimize_expr, Var, Const, BinOp
+)
 import time
 import unittest
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from engine import (
-    SymbolicEngine, SymbolicState,
-    expand_expr, optimize_expr, Var, Const, BinOp
-)
 
 
 class TestPerformance(unittest.TestCase):
@@ -80,8 +80,8 @@ class TestPerformance(unittest.TestCase):
         trace = []
         for i in range(200):
             addr = i * 8  # Different addresses
-            trace.append(f"mov ${i}, {addr}(%rsp)")
-            trace.append(f"add $1, {addr}(%rsp)")
+            trace.append(f"movq ${i}, {addr}(%rsp)")
+            trace.append(f"addq $1, {addr}(%rsp)")
 
         start_time = time.time()
         engine.parse_trace_and_execute(trace)
@@ -182,25 +182,21 @@ class TestStressScenarios(unittest.TestCase):
         ]
         engine.parse_trace_and_execute(setup_trace)
 
-        # Test complex addressing
         complex_trace = [
-            "mov $100, (%rsp)",
-            "mov $200, 8(%rsp)",
-            "mov $300, -16(%rbp)",
-            "mov $400, (%rsp,%rax,2)",
-            "mov $500, 32(%rbp,%rbx,4)",
-            "mov $600, -8(%rbp,%rax,1)"
+            "movq $100, (%rsp)",
+            "movq $200, 8(%rsp)",
+            "movq $300, -16(%rbp)",
+            "movq $400, (%rsp,%rax,2)",
+            "movq $500, 32(%rbp,%rbx,4)",
+            "movq $600, -8(%rbp,%rax,1)"
         ]
 
         engine.parse_trace_and_execute(complex_trace)
-
         self.assertGreaterEqual(len(engine.state.mem), 5)
 
     def test_instruction_format_variations(self):
-        """Test various instruction format variations."""
         engine = SymbolicEngine()
 
-        # Test different instruction suffixes and formats
         trace = [
             "mov $42, %rax",      # No suffix
             "movl $43, %ebx",     # Long suffix with %e register
@@ -218,7 +214,6 @@ class TestStressScenarios(unittest.TestCase):
         self.assertIn("rcx", engine.state.reg_versions)
 
     def test_edge_case_values(self):
-        """Test edge case numeric values."""
         engine = SymbolicEngine()
 
         trace = [
@@ -235,15 +230,14 @@ class TestStressScenarios(unittest.TestCase):
         self.assertIn("rax", engine.state.reg_versions)
 
     def test_memory_address_collisions(self):
-        """Test memory operations with address collisions."""
         engine = SymbolicEngine()
 
         trace = [
             "mov $0x1000, %rsp",
             "mov $8, %rax",
-            "mov $100, 8(%rsp)",
-            "mov $200, (%rsp,%rax,1)",
-            "add $50, 8(%rsp)",
+            "movq $100, 8(%rsp)",
+            "movq $200, (%rsp,%rax,1)",
+            "addq $50, 8(%rsp)",
         ]
 
         engine.parse_trace_and_execute(trace)
@@ -254,7 +248,6 @@ class TestStressScenarios(unittest.TestCase):
 
 
 def run_benchmarks():
-    """Run performance benchmarks and display results."""
     print("="*60)
     print("SYMBOLIC EXECUTION ENGINE PERFORMANCE BENCHMARKS")
     print("="*60)
