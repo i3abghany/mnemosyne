@@ -12,7 +12,6 @@ except ImportError:
 
 
 def run_test_suite(test_module_name, description):
-    """Run a specific test suite and return results."""
     print(f"\n{'='*60}")
     print(f"{description}")
     print(f"{'='*60}")
@@ -132,6 +131,7 @@ def main():
         ('test.test_performance', 'PERFORMANCE AND STRESS TESTS'),
         ('test.test_address_parsing', 'ADDRESS PARSING TESTS'),
         ('test.test_cyclic_memory_fix', 'CYCLIC MEMORY FIX TESTS'),
+        ('test.test_parser', 'TRACE PARSER TESTS'),
     ]
 
     all_results = []

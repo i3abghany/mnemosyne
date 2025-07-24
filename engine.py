@@ -3,7 +3,6 @@ from typing import Union, List
 import logging
 import re
 
-# Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -96,7 +95,6 @@ class SymbolicState:
 
 def parse_address(addr_str: str, state: SymbolicState):
     # Pattern: optional_displacement(base_reg, index_reg, scale)
-    # Updated to handle whitespace better and validate registers
     pattern = r"(?P<disp>[-+]?(?:0x[0-9a-f]+|\d+))?\s*\(\s*(?P<base>%[a-z0-9]+)?\s*(?:,\s*(?P<index>%[a-z0-9]+))?\s*(?:,\s*(?P<scale>[1248]))?\s*\)"
 
     m = re.match(pattern, addr_str.strip())
@@ -107,7 +105,6 @@ def parse_address(addr_str: str, state: SymbolicState):
 
     if m.group("base"):
         base_reg = m.group("base").strip('%')
-        # Check if register is valid
         valid_regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi",
                       "rsp", "rbp"] + [f"r{i}" for i in range(8, 16)]
         if base_reg not in valid_regs:
