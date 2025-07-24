@@ -118,6 +118,37 @@ def normalize_register_name(reg_name: str) -> str:
     return reg_map.get(reg_name, reg_name)
 
 
+def build_memory_address(mem_operand, state: SymbolicState) -> Expr:
+    components = []
+
+    # Base register
+    if mem_operand['base']:
+        base_name = normalize_register_name(mem_operand['base'])
+        base_expr = state.read_reg(base_name)
+        components.append(base_expr)
+
+    # Displacement
+    if mem_operand['disp'] != 0:
+        components.append(Const(mem_operand['disp']))
+
+    # Index register with scale
+    if mem_operand['index']:
+        index_name = normalize_register_name(mem_operand['index'])
+        index_expr = state.read_reg(index_name)
+        if mem_operand['scale'] is not None and mem_operand['scale'] > 1:
+            index_expr = BinOp("*", index_expr, Const(mem_operand['scale']))
+        components.append(index_expr)
+
+    if not components:
+        return Const(0)
+
+    addr = components[0]
+    for component in components[1:]:
+        addr = BinOp("+", addr, component)
+
+    return addr
+
+
 def operand_to_expr(operand, instruction, state: SymbolicState) -> Expr:
     if operand.type == OperandType.REG:
         reg_name = operand.reg
@@ -128,35 +159,7 @@ def operand_to_expr(operand, instruction, state: SymbolicState) -> Expr:
         return Const(operand.imm)
 
     elif operand.type == OperandType.MEM:
-        components = []
-
-        # Base register
-        if operand.mem['base']:
-            base_name = operand.mem['base']
-            base_name = normalize_register_name(base_name)
-            base_expr = state.read_reg(base_name)
-            components.append(base_expr)
-
-        if operand.mem['disp'] != 0:
-            components.append(Const(operand.mem['disp']))
-
-        # Index register with scale
-        if operand.mem['index']:
-            index_name = operand.mem['index']
-            index_name = normalize_register_name(index_name)
-            index_expr = state.read_reg(index_name)
-            if operand.mem['scale'] is not None and operand.mem['scale'] > 1:
-                index_expr = BinOp(
-                    "*", index_expr, Const(operand.mem['scale']))
-            components.append(index_expr)
-
-        if not components:
-            return Const(0)
-
-        addr = components[0]
-        for component in components[1:]:
-            addr = BinOp("+", addr, component)
-
+        addr = build_memory_address(operand.mem, state)
         if isinstance(addr, Mem):
             return addr
         return Mem(addr)
@@ -229,37 +232,11 @@ class SymbolicEngine:
 
         # Handle source operand - if it's memory, we need to load from it
         if src_operand.type == OperandType.MEM:
-            # Get the address expression
-            addr_components = []
-            if src_operand.mem['base']:
-                base_name = normalize_register_name(src_operand.mem['base'])
-                base_expr = self.state.read_reg(base_name)
-                addr_components.append(base_expr)
-
-            if src_operand.mem['disp'] != 0:
-                addr_components.append(Const(src_operand.mem['disp']))
-
-            if src_operand.mem['index']:
-                index_name = normalize_register_name(src_operand.mem['index'])
-                index_expr = self.state.read_reg(index_name)
-                if src_operand.mem['scale'] is not None:
-                    if src_operand.mem['scale'] > 1:
-                        index_expr = BinOp(
-                            "*", index_expr, Const(src_operand.mem['scale']))
-                addr_components.append(index_expr)
-
-            if not addr_components:
-                addr = Const(0)
-            else:
-                addr = addr_components[0]
-                for component in addr_components[1:]:
-                    addr = BinOp("+", addr, component)
-
+            addr = build_memory_address(src_operand.mem, self.state)
             addr = optimize_expr(addr, self.state)
             src_expr = self.state.mem_load(addr)
         else:
-            src_expr = operand_to_expr(
-                src_operand, instruction, self.state)
+            src_expr = operand_to_expr(src_operand, instruction, self.state)
 
         # Get destination
         dst_type, dst_id = operand_to_lvalue(
@@ -285,38 +262,9 @@ class SymbolicEngine:
         src_operand, dst_operand = operands
 
         # For LEA, we want the address itself, not the memory content
-        if src_operand.type == CS_OP_MEM:
-            components = []
-
-            # Base register
-            if src_operand.mem.base != 0:
-                base_name = instruction.reg_name(src_operand.mem.base)
-                base_name = normalize_register_name(base_name)
-                base_expr = self.state.read_reg(base_name)
-                components.append(base_expr)
-
-            # Index register with scale
-            if src_operand.mem.index != 0:
-                index_name = instruction.reg_name(src_operand.mem.index)
-                index_name = normalize_register_name(index_name)
-                index_expr = self.state.read_reg(index_name)
-                if src_operand.mem.scale is not None and src_operand.mem.scale > 1:
-                    index_expr = BinOp(
-                        "*", index_expr, Const(src_operand.mem.scale))
-                components.append(index_expr)
-
-            # Displacement
-            if src_operand.mem.disp != 0:
-                components.append(Const(src_operand.mem.disp))
-
-            if not components:
-                addr_expr = Const(0)
-            else:
-                addr_expr = components[0]
-                for component in components[1:]:
-                    addr_expr = BinOp("+", addr_expr, component)
-
-        elif src_operand.type == CS_OP_IMM:
+        if src_operand.type == OperandType.MEM:
+            addr_expr = build_memory_address(src_operand.mem, self.state)
+        elif src_operand.type == OperandType.IMM:
             addr_expr = Const(src_operand.imm)
         else:
             logger.warning(
