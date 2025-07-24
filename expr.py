@@ -69,9 +69,9 @@ def optimize_expr(expr: Expr, state) -> Expr:
                     return Const(left.value * right.value)
                 elif e.op == "/":
                     return Const(left.value // right.value)
-                elif e.op == '<<':
+                elif e.op == "<<":
                     return Const(left.value << right.value)
-                elif e.op == '>>':
+                elif e.op == ">>":
                     return Const(left.value >> right.value)
                 elif e.op == "&":
                     return Const(left.value & right.value)
@@ -93,7 +93,9 @@ def optimize_expr(expr: Expr, state) -> Expr:
                     return right
                 if isinstance(right, Const) and right.value == 1:
                     return left
-                if (isinstance(left, Const) and left.value == 0) or (isinstance(right, Const) and right.value == 0):
+                if (isinstance(left, Const) and left.value == 0) or (
+                    isinstance(right, Const) and right.value == 0
+                ):
                     return Const(0)
 
             if e.op == "+":

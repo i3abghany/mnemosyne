@@ -31,8 +31,9 @@ class Instruction:
 class TraceParser:
     def __init__(self, trace):
         # remove "endbr64" and "nop" instructions from the trace as they're not supported by Keystone
-        self.trace = [inst for inst in trace if inst.strip() and inst not in [
-            'endbr64', 'nop']]
+        self.trace = [
+            inst for inst in trace if inst.strip() and inst not in ["endbr64", "nop"]
+        ]
 
         self.ks = Ks(KS_ARCH_X86, KS_MODE_64)
         self.ks.syntax = KS_OPT_SYNTAX_ATT
@@ -56,26 +57,28 @@ class TraceParser:
             return Operand(type=OperandType.IMM, imm=op.imm)
         elif op.type == CS_OP_MEM:
             mem = {
-                'base': insn.reg_name(op.mem.base) if op.mem.base != 0 else None,
-                'index': insn.reg_name(op.mem.index) if op.mem.index != 0 else None,
-                'scale': op.mem.scale if op.mem.scale != 1 else None,
-                'disp': op.mem.disp
+                "base": insn.reg_name(op.mem.base) if op.mem.base != 0 else None,
+                "index": insn.reg_name(op.mem.index) if op.mem.index != 0 else None,
+                "scale": op.mem.scale if op.mem.scale != 1 else None,
+                "disp": op.mem.disp,
             }
         return Operand(type=OperandType.MEM, mem=mem)
 
     def parse(self):
         if not self.trace:
             return []
-        instructions = ';'.join(self.trace)
+        instructions = ";".join(self.trace)
         encoding, _ = self.ks.asm(instructions)
         disassembled = self.md.disasm(bytes(encoding), 0x1000)
         parsed_instructions = []
         for insn in disassembled:
-            parsed_instructions.append(Instruction(
-                address=insn.address,
-                mnemonic=insn.mnemonic,
-                operands=self._get_ops(insn),
-                size=insn.size,
-                prefix=[pre for pre in insn.prefix if pre != 0],
-            ))
+            parsed_instructions.append(
+                Instruction(
+                    address=insn.address,
+                    mnemonic=insn.mnemonic,
+                    operands=self._get_ops(insn),
+                    size=insn.size,
+                    prefix=[pre for pre in insn.prefix if pre != 0],
+                )
+            )
         return parsed_instructions
