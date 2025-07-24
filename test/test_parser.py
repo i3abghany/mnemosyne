@@ -42,10 +42,10 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
         
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['mnemonic'], trace[0].split()[0])
-        self.assertEqual(len(result[0]['ops']), 2)
-        self.assertIsInstance(result[0]['address'], int)
-        self.assertIsInstance(result[0]['size'], int)
+        self.assertEqual(result[0].mnemonic, trace[0].split()[0])
+        self.assertEqual(len(result[0].operands), 2)
+        self.assertIsInstance(result[0].address, int)
+        self.assertIsInstance(result[0].size, int)
 
     def test_parse_multiple_instructions(self):
         trace = [
@@ -57,7 +57,7 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
         
         self.assertEqual(len(result), 3)
-        mnemonics = [insn['mnemonic'] for insn in result]
+        mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(mnemonics, [line.split()[0] for line in trace])
 
     def test_parse_arithmetic_instructions(self):
@@ -73,7 +73,7 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
 
         expected_mnemonics = [line.split()[0] for line in trace]
-        actual_mnemonics = [insn['mnemonic'] for insn in result]
+        actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
 
     def test_parse_logical_instructions(self):
@@ -89,7 +89,7 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
         
         expected_mnemonics = [line.split()[0] for line in trace]
-        actual_mnemonics = [insn['mnemonic'] for insn in result]
+        actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
 
     def test_parse_memory_instructions(self):
@@ -104,7 +104,7 @@ class TestTraceParser(unittest.TestCase):
         parser = TraceParser(trace)
         result = parser.parse()
         expected_mnemonics = [line.split()[0] for line in trace]
-        actual_mnemonics = [insn['mnemonic'] for insn in result]
+        actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
 
     def test_parse_control_flow_instructions(self):
@@ -115,7 +115,7 @@ class TestTraceParser(unittest.TestCase):
         ]
         parser = TraceParser(trace)
         result = parser.parse()
-        control_mnemonics = [insn['mnemonic'] for insn in result]
+        control_mnemonics = [insn.mnemonic for insn in result]
         expected_mnemonics = ['callq', 'retq', 'jmpq']
         self.assertEqual(control_mnemonics, expected_mnemonics)
 
@@ -131,7 +131,7 @@ class TestTraceParser(unittest.TestCase):
         
         self.assertEqual(len(result), 4)
         for insn in result:
-            self.assertTrue(len(insn['ops']) == 2)
+            self.assertTrue(len(insn.operands) == 2)
 
     def test_parse_register_operands(self):
         trace = [
@@ -147,8 +147,8 @@ class TestTraceParser(unittest.TestCase):
         
         self.assertEqual(len(result), len(trace))
         for i, insn in enumerate(result):
-            self.assertEqual(insn['mnemonic'], trace[i].split()[0])
-            self.assertEqual(len(insn['ops']), 2)
+            self.assertEqual(insn.mnemonic, trace[i].split()[0])
+            self.assertEqual(len(insn.operands), 2)
 
     def test_parse_complex_addressing(self):
         trace = [
@@ -163,8 +163,8 @@ class TestTraceParser(unittest.TestCase):
         
         self.assertEqual(len(result), len(trace))
         for insn in result:
-            self.assertEqual(insn['mnemonic'], 'movq')
-            self.assertEqual(len(insn['ops']), 2)
+            self.assertEqual(insn.mnemonic, 'movq')
+            self.assertEqual(len(insn.operands), 2)
 
     def test_parse_floating_point_instructions(self):
         trace = [
@@ -177,7 +177,7 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
         
         expected_mnemonics = ['addss', 'subsd', 'mulps', 'divpd']
-        actual_mnemonics = [insn['mnemonic'] for insn in result]
+        actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
 
     def test_parse_vector_instructions(self):
@@ -191,7 +191,7 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
         
         expected_mnemonics = ['movdqa', 'paddb', 'psubb', 'pmullw']
-        actual_mnemonics = [insn['mnemonic'] for insn in result]
+        actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
 
     def test_parse_operand_types(self):
@@ -200,9 +200,9 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
         
         insn = result[0]
-        self.assertEqual(len(insn['ops']), 2)
-        
-        op1, op2 = insn['ops']
+        self.assertEqual(len(insn.operands), 2)
+
+        op1, op2 = insn.operands
         self.assertEqual(op1.type, CS_OP_REG)
         self.assertEqual(op2.type, CS_OP_REG)
 
@@ -212,9 +212,9 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
         
         insn = result[0]
-        self.assertEqual(len(insn['ops']), 2)
-        
-        op1, op2 = insn['ops']
+        self.assertEqual(len(insn.operands), 2)
+
+        op1, op2 = insn.operands
         self.assertEqual(CS_OP_IMM, op1.type)
         self.assertEqual(CS_OP_REG, op2.type)
 
@@ -224,9 +224,9 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
         
         insn = result[0]
-        self.assertEqual(len(insn['ops']), 2)
-        
-        op1, op2 = insn['ops']
+        self.assertEqual(len(insn.operands), 2)
+
+        op1, op2 = insn.operands
         self.assertEqual(op1.type, CS_OP_MEM)
         self.assertEqual(op2.type, CS_OP_REG)
 
@@ -245,7 +245,7 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
         
         self.assertEqual(len(result), 3)
-        mnemonics = [insn['mnemonic'] for insn in result]
+        mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(mnemonics, ['movq', 'addq', 'subq'])
 
     def test_parse_prefix_instructions(self):
@@ -261,7 +261,7 @@ class TestTraceParser(unittest.TestCase):
         self.assertEqual(len(result), len(trace))
 
         def has_prefix(insn, prefix):
-            return any(pre == prefix for pre in insn['prefix'])
+            return any(pre == prefix for pre in insn.prefix)
 
         self.assertTrue(has_prefix(result[0], X86_PREFIX_REP))
         self.assertTrue(has_prefix(result[1], X86_PREFIX_LOCK))
@@ -277,7 +277,7 @@ class TestTraceParser(unittest.TestCase):
         
         self.assertEqual(len(result), 2)
         for insn in result:
-            self.assertEqual(insn['mnemonic'], 'movq')
+            self.assertEqual(insn.mnemonic, 'movq')
 
     def test_parse_large_trace(self):
         base_instructions = [
@@ -294,10 +294,10 @@ class TestTraceParser(unittest.TestCase):
         self.assertEqual(len(result), 1000)
         for i in range(0, len(result), len(base_instructions)):
             if i + 3 < len(result):
-                self.assertEqual(result[i]['mnemonic'], 'movq')
-                self.assertEqual(result[i + 1]['mnemonic'], 'addq')
-                self.assertEqual(result[i + 2]['mnemonic'], 'subq')
-                self.assertEqual(result[i + 3]['mnemonic'], 'mulq')
+                self.assertEqual(result[i].mnemonic, 'movq')
+                self.assertEqual(result[i + 1].mnemonic, 'addq')
+                self.assertEqual(result[i + 2].mnemonic, 'subq')
+                self.assertEqual(result[i + 3].mnemonic, 'mulq')
 
     def test_parse_conditional_jumps(self):
         trace = [
@@ -312,7 +312,7 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
         self.assertEqual(len(result), len(trace))
         expected_mnemonics = ['je', 'jne', 'jb', 'jae', 'jo', 'jno']
-        self.assertEqual([insn['mnemonic'] for insn in result], expected_mnemonics)
+        self.assertEqual([insn.mnemonic for insn in result], expected_mnemonics)
 
     def test_parse_compare_and_test(self):
         trace = [
@@ -325,7 +325,7 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
         
         expected_mnemonics = [line.split()[0] for line in trace]
-        actual_mnemonics = [insn['mnemonic'] for insn in result]
+        actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
 
     def test_parse_string_instructions(self):
@@ -342,7 +342,7 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
         
         expected_mnemonics = ['movsb', 'movsw', 'movsl', 'lodsb', 'stosb', 'scasb', 'cmpsb']
-        actual_mnemonics = [insn['mnemonic'] for insn in result]
+        actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
 
     def test_parse_bit_manipulation(self):
@@ -358,7 +358,7 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
 
         expected_mnemonics = ['btq', 'btsq', 'btrq', 'btcq', 'bsfq', 'bsrq']
-        actual_mnemonics = [insn['mnemonic'] for insn in result]
+        actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
 
     def test_parse_stack_operations(self):
@@ -374,7 +374,7 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
         
         expected_mnemonics = [line.split()[0] for line in trace]
-        actual_mnemonics = [insn['mnemonic'] for insn in result]
+        actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
 
     def test_parse_system_instructions(self):
@@ -390,7 +390,7 @@ class TestTraceParser(unittest.TestCase):
         result = parser.parse()
         
         expected_mnemonics = ['nop', 'hlt', 'cli', 'sti', 'cld', 'std']
-        actual_mnemonics = [insn['mnemonic'] for insn in result]
+        actual_mnemonics = [insn.mnemonic for insn in result]
         self.assertEqual(actual_mnemonics, expected_mnemonics)
 
 
@@ -444,12 +444,12 @@ class TestTraceParserIntegration(unittest.TestCase):
 
         result = parser.parse()
         self.assertEqual(len(result), 11)
-        
-        self.assertEqual(result[0]['mnemonic'], 'pushq')
-        self.assertEqual(result[-1]['mnemonic'], 'retq')
+
+        self.assertEqual(result[0].mnemonic, 'pushq')
+        self.assertEqual(result[-1].mnemonic, 'retq')
 
         for i in range(1, len(result)):
-            self.assertGreater(result[i]['address'], result[i-1]['address'])
+            self.assertGreater(result[i].address, result[i-1].address)
 
     def test_function_call_sequence(self):
         trace = [
@@ -464,7 +464,7 @@ class TestTraceParserIntegration(unittest.TestCase):
         parser = TraceParser(trace)
         result = parser.parse()
         self.assertEqual(len(result), 7)
-        mnemonics = [insn['mnemonic'] for insn in result]
+        mnemonics = [insn.mnemonic for insn in result]
         expected_mnemonic = ['pushq', 'pushq', 'movq', 'movabsq', 'callq', 'popq', 'popq']
         self.assertEqual(mnemonics, expected_mnemonic)
 
@@ -481,7 +481,7 @@ class TestTraceParserIntegration(unittest.TestCase):
         parser = TraceParser(trace)
         result = parser.parse()
         self.assertEqual(len(result), 6)
-        mnemonics = [insn['mnemonic'] for insn in result]
+        mnemonics = [insn.mnemonic for insn in result]
         expected_mnemonics = ['movabsq', 'movabsq', 'addq', 'decq', 'jne', 'movq']
         self.assertEqual(mnemonics, expected_mnemonics)
 

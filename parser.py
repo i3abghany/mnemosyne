@@ -2,6 +2,17 @@ from keystone import *
 from capstone import *
 from capstone.x86_const import *
 
+from dataclasses import dataclass
+
+
+@dataclass
+class Instruction:
+    address: int
+    mnemonic: str
+    operands: list
+    size: int
+    prefix: list
+
 
 class TraceParser:
     def __init__(self, trace):
@@ -22,11 +33,11 @@ class TraceParser:
         disassembled = self.md.disasm(bytes(encoding), 0x1000)
         parsed_instructions = []
         for insn in disassembled:
-            parsed_instructions.append({
-                'address': insn.address,
-                'mnemonic': insn.mnemonic,
-                'ops': [op for op in insn.operands],
-                'size': insn.size,
-                'prefix': [pre for pre in insn.prefix if pre != 0],
-            })
+            parsed_instructions.append(Instruction(
+                address=insn.address,
+                mnemonic=insn.mnemonic,
+                operands=[op for op in insn.operands],
+                size=insn.size,
+                prefix=[pre for pre in insn.prefix if pre != 0],
+            ))
         return parsed_instructions
