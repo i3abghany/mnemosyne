@@ -97,6 +97,6 @@ This produces a filtered trace file (`example.log`) containing only the main fun
 
 ## Requirements
 
-- Mnemosyne is tested on Python 3.13.2
+- Mnemosyne is tested on Python versions 3.13.2 and 3.11.9.
 - `keystone-engine` and `capstone` for assembly parsing
 - optionally: `coverage` for test coverage reports
