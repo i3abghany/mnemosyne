@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from parser import TraceParser, OperandType
 import unittest
 import sys

@@ -1,8 +1,6 @@
-#!/usr/bin/env python3
-
 from engine import (
-    SymbolicEngine, SymbolicState,
-    expand_expr, optimize_expr, Var, Const, BinOp
+    SymbolicEngine, expand_expr, optimize_expr,
+    Var, Const, BinOp
 )
 import time
 import unittest
@@ -43,7 +41,8 @@ class TestPerformance(unittest.TestCase):
 
         engine = SymbolicEngine()
 
-        # Create a chain of additions that will create deeply nested expressions
+        # Create a chain of additions that will create deeply nested
+        # expressions
         trace = ["mov $1, %rax"]
         for i in range(100):
             trace.append(f"add $1, %rax")
@@ -248,9 +247,9 @@ class TestStressScenarios(unittest.TestCase):
 
 
 def run_benchmarks():
-    print("="*60)
+    print("=" * 60)
     print("SYMBOLIC EXECUTION ENGINE PERFORMANCE BENCHMARKS")
-    print("="*60)
+    print("=" * 60)
 
     suite = unittest.TestSuite()
     suite.addTest(TestPerformance('test_large_trace_performance'))
@@ -262,9 +261,9 @@ def run_benchmarks():
     runner = unittest.TextTestRunner(verbosity=2)
     runner.run(suite)
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("STRESS TEST SCENARIOS")
-    print("="*60)
+    print("=" * 60)
 
     stress_suite = unittest.TestSuite()
     stress_suite.addTest(TestStressScenarios(
@@ -279,7 +278,8 @@ def run_benchmarks():
 
 
 if __name__ == '__main__':
-    if len(__import__('sys').argv) > 1 and __import__('sys').argv[1] == '--benchmark':
+    if len(__import__('sys').argv) > 1 and __import__(
+            'sys').argv[1] == '--benchmark':
         run_benchmarks()
     else:
         unittest.main(verbosity=2)

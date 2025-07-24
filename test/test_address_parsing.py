@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from engine import SymbolicState, parse_address, Var, Mem, BinOp, Const
 import unittest
 import sys
