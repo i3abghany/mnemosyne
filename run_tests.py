@@ -127,7 +127,6 @@ def main():
     test_suites = [
         ('test.test_engine', 'CORE ENGINE TESTS'),
         ('test.test_performance', 'PERFORMANCE AND STRESS TESTS'),
-        # ('test.test_address_parsing', 'ADDRESS PARSING TESTS'),
         ('test.test_cyclic_memory_fix', 'CYCLIC MEMORY FIX TESTS'),
         ('test.test_parser', 'TRACE PARSER TESTS'),
     ]
@@ -162,7 +161,7 @@ def main():
         cov.save()
         cov.report()
         cov.xml_report(outfile='coverage.xml')
-        print(f"\nCoverage report saved to coverage.xml")
+        print("\nCoverage report saved to coverage.xml")
 
     print(f"\n{'='*60}")
     print("OVERALL SUMMARY")
