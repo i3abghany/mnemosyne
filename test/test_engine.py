@@ -71,8 +71,6 @@ class TestSymbolicState(unittest.TestCase):
     def test_initial_state(self):
         self.assertEqual(self.state.reg_versions, {})
         self.assertEqual(len(self.state.mem), 0)
-        self.assertIn("rsp_1", self.state.definitions)
-        self.assertEqual(str(self.state.rsp_val), "4096")  # 0x1000
 
     def test_new_var_creation(self):
         v1 = self.state.new_var("rax")

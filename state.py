@@ -6,8 +6,6 @@ class SymbolicState:
         self.reg_versions = {}
         self.mem = {}
         self.definitions = {}
-        self.rsp_val = Const(0x1000)
-        self.definitions["rsp_1"] = self.rsp_val
 
     def new_var(self, name):
         version = self.reg_versions.get(name, 0) + 1
