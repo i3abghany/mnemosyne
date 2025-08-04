@@ -230,34 +230,243 @@ class TestTraceExecution(unittest.TestCase):
             "nop",
             "cmp %rax, %rbx",
             "jne 0x1000",
-            "movq $42, %rax",
+            "movq $0x2A, %rax",
             "retq"
         ]
         engine = SymbolicEngine(self.state)
         engine.parse_trace_and_execute(trace)
 
         # Only the mov should be executed
-        self.assertEqual(len(self.state.reg_versions), 1)  # Only rax
-        self.assertEqual(str(self.state.definitions["rax_1"]), str(0x42))
+        self.assertEqual(len(self.state.reg_versions), 1)
+        self.assertEqual(str(self.state.definitions["rax_1"]), str(0x2A))
 
     def test_register_name_normalization(self):
         """Test that %e* registers are normalized to %r*."""
-        trace = ["mov $99, %eax"]  # Should become %rax
+        trace = ["mov $0x63, %eax"]
         engine = SymbolicEngine(self.state)
         engine.parse_trace_and_execute(trace)
 
         self.assertIn("rax_1", self.state.definitions)
-        self.assertEqual(str(self.state.definitions["rax_1"]), str(0x99))
+        self.assertEqual(str(self.state.definitions["rax_1"]), str(0x63))
 
+    def test_rep_movsq_concrete_count(self):
+        """Test rep movsq with concrete count."""
+        trace = [
+            "movq $0x1000, %rsi",
+            "movq $0x2000, %rdi",
+            "movq $0x3, %rcx",
+            "rep movsq (%rsi), (%rdi)"
+        ]
+        engine = SymbolicEngine(self.state)
+        engine.parse_trace_and_execute(trace)
 
-class TestExpressionExpansion(unittest.TestCase):
-    """Test expression expansion and optimization."""
+        # RSI should be 0x1000 + 0x3*8
+        rsi_var = self.state.read_reg("rsi")
+        rsi_optimized = optimize_expr(rsi_var, self.state)
+        self.assertIsInstance(rsi_optimized, Const)
+        self.assertEqual(rsi_optimized.value, 0x1000 + 0x3 * 8)
 
-    def setUp(self):
-        """Set up symbolic state with some definitions."""
-        self.state = SymbolicState()
-        self.state.write_reg("rax", Const(42))
-        self.state.write_reg("rbx", BinOp("+", Var("rax", 1), Const(8)))
+        # RDI should be 0x2000 + 0x3*8
+        rdi_var = self.state.read_reg("rdi")
+        rdi_optimized = optimize_expr(rdi_var, self.state)
+        self.assertIsInstance(rdi_optimized, Const)
+        self.assertEqual(rdi_optimized.value, 0x2000 + 0x3 * 8)
+
+        # RCX should be 0
+        rcx_var = self.state.read_reg("rcx")
+        rcx_optimized = optimize_expr(rcx_var, self.state)
+        self.assertIsInstance(rcx_optimized, Const)
+        self.assertEqual(rcx_optimized.value, 0)
+
+        # Check that memory operations were created
+        # Should have 3 memory stores: mem[0x2000], mem[0x2008], mem[0x2010]
+        expected_addrs = [str(0x2000 + i * 8) for i in range(3)]
+        for addr in expected_addrs:
+            self.assertIn(addr, self.state.mem)
+
+    def test_rep_movsq_zero_count(self):
+        """Test rep movsq with zero count (should do nothing)."""
+        trace = [
+            "movq $0x1000, %rsi",
+            "movq $0x2000, %rdi",
+            "movq $0, %rcx",
+            "rep movsq (%rsi), (%rdi)"
+        ]
+        engine = SymbolicEngine(self.state)
+        engine.parse_trace_and_execute(trace)
+
+        # With zero count, no memory operations should occur
+        self.assertEqual(len(self.state.mem), 0)
+
+        # Registers should remain at their initial values
+        rsi_var = self.state.read_reg("rsi")
+        rsi_optimized = optimize_expr(rsi_var, self.state)
+        self.assertIsInstance(rsi_optimized, Const)
+        self.assertEqual(rsi_optimized.value, 0x1000)
+
+        rdi_var = self.state.read_reg("rdi")
+        rdi_optimized = optimize_expr(rdi_var, self.state)
+        self.assertIsInstance(rdi_optimized, Const)
+        self.assertEqual(rdi_optimized.value, 0x2000)
+
+        rcx_var = self.state.read_reg("rcx")
+        rcx_optimized = optimize_expr(rcx_var, self.state)
+        self.assertIsInstance(rcx_optimized, Const)
+        self.assertEqual(rcx_optimized.value, 0)
+
+    def test_rep_movsq_symbolic_count(self):
+        """Test rep movsq with symbolic count."""
+        trace = [
+            "movq $0x1000, %rsi",
+            "movq $0x2000, %rdi",
+            # Don't set RCX - it will be symbolic (rcx_0)
+            "rep movsq (%rsi), (%rdi)"
+        ]
+        engine = SymbolicEngine(self.state)
+        engine.parse_trace_and_execute(trace)
+
+        # Check that registers have symbolic expressions
+        rsi_var = self.state.read_reg("rsi")
+        rsi_optimized = optimize_expr(rsi_var, self.state)
+        self.assertIsInstance(rsi_optimized, BinOp)
+        self.assertEqual(rsi_optimized.op, "+")
+        # Should be (4096 + (rcx_0 * 8))
+
+        rdi_var = self.state.read_reg("rdi")
+        rdi_optimized = optimize_expr(rdi_var, self.state)
+        self.assertIsInstance(rdi_optimized, BinOp)
+        self.assertEqual(rdi_optimized.op, "+")
+        self.assertEqual(str(rdi_optimized), "(8192 + (rcx_0 * 8))")
+
+        # RCX should be 0
+        rcx_var = self.state.read_reg("rcx")
+        rcx_optimized = optimize_expr(rcx_var, self.state)
+        self.assertIsInstance(rcx_optimized, Const)
+        self.assertEqual(rcx_optimized.value, 0)
+
+        # Should have one symbolic memory operation
+        self.assertEqual(len(self.state.mem), 1)
+        self.assertIn("8192", self.state.mem)  # 0x2000 in decimal
+
+    def test_rep_movsq_with_symbolic_addresses(self):
+        """Test rep movsq with symbolic source and destination addresses."""
+        trace = [
+            "movq $0x5, %rcx",
+            # RSI and RDI will be symbolic (rsi_0, rdi_0)
+            "rep movsq (%rsi), (%rdi)"
+        ]
+        engine = SymbolicEngine(self.state)
+        engine.parse_trace_and_execute(trace)
+
+        # Check that registers were updated with symbolic expressions
+        rsi_var = self.state.read_reg("rsi")
+        rsi_optimized = optimize_expr(rsi_var, self.state)
+        self.assertIsInstance(rsi_optimized, BinOp)
+        self.assertEqual(rsi_optimized.op, "+")
+
+        rdi_var = self.state.read_reg("rdi")
+        rdi_optimized = optimize_expr(rdi_var, self.state)
+        self.assertIsInstance(rdi_optimized, BinOp)
+        self.assertEqual(rdi_optimized.op, "+")
+
+        # RCX should be 0
+        rcx_var = self.state.read_reg("rcx")
+        rcx_optimized = optimize_expr(rcx_var, self.state)
+        self.assertIsInstance(rcx_optimized, Const)
+        self.assertEqual(rcx_optimized.value, 0)
+
+        # Should have 5 memory operations with symbolic addresses
+        self.assertEqual(len(self.state.mem), 5)
+
+    def test_rep_movsq_large_count(self):
+        """Test rep movsq with a larger count to verify loop behavior."""
+        trace = [
+            "movq $0x1000, %rsi",
+            "movq $0x2000, %rdi",
+            "movq $0x22, %rcx",
+            "rep movsq (%rsi), (%rdi)"
+        ]
+        state = SymbolicState()
+        engine = SymbolicEngine(state)
+        engine.parse_trace_and_execute(trace)
+
+        # Check final register values
+        rsi_var = state.read_reg("rsi")
+        rsi_optimized = optimize_expr(rsi_var, state)
+        self.assertIsInstance(rsi_optimized, Const)
+        self.assertEqual(rsi_optimized.value, 0x1000 + 0x22*8)
+
+        rdi_var = state.read_reg("rdi")
+        rdi_optimized = optimize_expr(rdi_var, state)
+        self.assertIsInstance(rdi_optimized, Const)
+        self.assertEqual(rdi_optimized.value, 0x2000 + 0x22*8)
+
+        # Should have 22 memory operations
+        self.assertEqual(len(state.mem), 0x22)
+
+        # Check that all expected addresses are present
+        base_addr = 0x2000
+        for i in range(0x22):
+            expected_addr = str(base_addr + i * 8)
+            self.assertIn(expected_addr, state.mem)
+
+    def test_rep_movsq_memory_overlap_symbolic(self):
+        """Test rep movsq with symbolic memory overlap scenarios."""
+        state = SymbolicState()
+        engine = SymbolicEngine(state)
+
+        trace = [
+            "movq $0x100, (%rsp)",
+            "leaq 8(%rsp), %rsi",
+            "movq %rsp, %rdi",
+            "movq $0x2, %rcx",
+            "rep movsq (%rsi), (%rdi)",
+            "movq (%rsp), %rax",
+        ]
+
+        engine.parse_trace_and_execute(trace)
+
+        self.assertIn("rax_1", state.definitions)
+        self.assertEqual(len(state.mem), 2)
+
+    def test_rep_movsq_with_arithmetic_expressions(self):
+        """Test rep movsq with computed addresses and counts."""
+        state = SymbolicState()
+        engine = SymbolicEngine(state)
+
+        trace = [
+            "movq $0x1000, %rax",
+            "addq $0x50, %rax",
+            "movq %rax, %rsi",  # rsi = 0x1050
+
+            "movq $0x2000, %rbx",
+            "subq $0x10, %rbx",
+            "movq %rbx, %rdi",  # rdi = 0x1FF0
+
+            "movq $0x10, %rcx",
+            "subq $0x7, %rcx",  # rcx = 0x9
+
+            "rep movsq (%rsi), (%rdi)",
+        ]
+
+        engine.parse_trace_and_execute(trace)
+
+        # Verify final register states
+        rsi_final = optimize_expr(state.read_reg("rsi"), state)
+        rdi_final = optimize_expr(state.read_reg("rdi"), state)
+        rcx_final = optimize_expr(state.read_reg("rcx"), state)
+
+        self.assertIsInstance(rsi_final, Const)
+        self.assertEqual(rsi_final.value, 0x1050 + 0x9*8)
+
+        self.assertIsInstance(rdi_final, Const)
+        self.assertEqual(rdi_final.value, 0x1FF0 + 0x9*8)
+
+        self.assertIsInstance(rcx_final, Const)
+        self.assertEqual(rcx_final.value, 0)
+
+        # Should have 9 memory operations from rep movsq
+        self.assertEqual(len(state.mem), 9)
 
     def test_expand_const(self):
         """Test expanding constant expressions."""
@@ -636,6 +845,44 @@ class TestIntegration(unittest.TestCase):
         final_rax = state.current_var("rax")
         expanded_rax = expand_expr(final_rax, state)
         self.assertIsNotNone(expanded_rax)
+
+    def test_rep_movsq_integration(self):
+        """Test rep movsq integration with other operations."""
+        state = SymbolicState()
+        engine = SymbolicEngine(state)
+
+        trace = [
+            "movq $0x1000, %rax",
+            "movq %rax, %rsi",
+            "addq $0x100, %rax",
+            "movq %rax, %rdi",
+            "movq $5, %rcx",
+
+            "rep movsq (%rsi), (%rdi)",
+            "movq (%rdi), %rbx",
+        ]
+
+        engine.parse_trace_and_execute(trace)
+
+        # Verify the copy operation completed
+        rcx_var = state.read_reg("rcx")
+        rcx_optimized = optimize_expr(rcx_var, state)
+        self.assertIsInstance(rcx_optimized, Const)
+        self.assertEqual(rcx_optimized.value, 0)
+
+        # Verify memory operations occurred
+        self.assertEqual(len(state.mem), 5)
+
+        # Verify registers were updated correctly
+        rsi_var = state.read_reg("rsi")
+        rsi_optimized = optimize_expr(rsi_var, state)
+        self.assertIsInstance(rsi_optimized, Const)
+        self.assertEqual(rsi_optimized.value, 0x1000 + 5*8)
+
+        rdi_var = state.read_reg("rdi")
+        rdi_optimized = optimize_expr(rdi_var, state)
+        self.assertIsInstance(rdi_optimized, Const)
+        self.assertEqual(rdi_optimized.value, 0x1100 + 5*8)
 
 
 class TestErrorHandling(unittest.TestCase):

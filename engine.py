@@ -130,6 +130,9 @@ class SymbolicEngine:
             ):
                 self._handle_arithmetic(instruction, operands)
 
+            elif mnemonic.startswith("rep movsq"):
+                self._handle_rep_movsq(operands)
+
             else:
                 logger.warning(f"Unhandled instruction: {mnemonic}")
 
@@ -255,6 +258,67 @@ class SymbolicEngine:
             logger.info(f"{mem_var} = {new_val}")
         else:
             logger.warning(f"Unsupported destination type: {dst_type}")
+            exit()
+
+    def _handle_rep_movsq(self, operands):
+        rsi_var = self.state.read_reg("rsi")
+        rdi_var = self.state.read_reg("rdi")
+        rcx_var = self.state.read_reg("rcx")
+
+        rsi_expr = optimize_expr(rsi_var, self.state)
+        rdi_expr = optimize_expr(rdi_var, self.state)
+        rcx_expr = optimize_expr(rcx_var, self.state)
+
+        logger.info(f"RSI (source): {rsi_expr}")
+        logger.info(f"RDI (destination): {rdi_expr}")
+        logger.info(f"RCX (count): {rcx_expr}")
+
+        if isinstance(rcx_expr, Const) and rcx_expr.value == 0:
+            logger.info("RCX is 0, rep movsq does nothing")
+            return
+
+        if isinstance(rcx_expr, Const) and rcx_expr.value > 0:
+            count = rcx_expr.value
+            logger.info(
+                f"Copying {count} quadwords from {rsi_expr} to {rdi_expr}")
+
+            for i in range(count):
+                off = i * 8
+                src_addr = BinOp("+", rsi_expr, Const(off)
+                                 ) if i > 0 else rsi_expr
+                dst_addr = BinOp("+", rdi_expr, Const(off)
+                                 ) if i > 0 else rdi_expr
+
+                src_addr = optimize_expr(src_addr, self.state)
+                dst_addr = optimize_expr(dst_addr, self.state)
+
+                src_value = self.state.mem_load(src_addr)
+                mem_var, _ = self.state.mem_store(dst_addr, src_value)
+                logger.info(f"  Copy {i}: {mem_var} = mem[{src_addr}]")
+        else:  # Count is symbolic
+            logger.info(
+                "Symbolic count detected - modeling abstract memory copy")
+
+            src_region = Mem(rsi_expr)
+            self.state.mem_store(rdi_expr, src_region)
+            logger.info(
+                f"Symbolic copy: mem[{rdi_expr}] = mem[{rsi_expr}] (count: {rcx_expr})")
+
+        # RSI = RSI + RCX * 8
+        new_rsi = BinOp("+", rsi_expr, BinOp("*", rcx_expr, Const(8)))
+        new_rsi = optimize_expr(new_rsi, self.state)
+        rsi_result, _ = self.state.write_reg("rsi", new_rsi)
+        logger.info(f"{rsi_result} = {new_rsi}")
+
+        # RDI = RDI + RCX * 8
+        new_rdi = BinOp("+", rdi_expr, BinOp("*", rcx_expr, Const(8)))
+        new_rdi = optimize_expr(new_rdi, self.state)
+        rdi_result, _ = self.state.write_reg("rdi", new_rdi)
+        logger.info(f"{rdi_result} = {new_rdi}")
+
+        # RCX = 0 (all data copied)
+        rcx_result, _ = self.state.write_reg("rcx", Const(0))
+        logger.info(f"{rcx_result} = 0")
 
 
 def get_trace_from_file(file_path):
