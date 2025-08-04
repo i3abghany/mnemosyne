@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
-from engine import (
-    Expr, Const, Var, Mem, BinOp, SymbolicState,
-    SymbolicEngine, expand_expr, optimize_expr
-)
+from engine import SymbolicEngine
+from expr import expand_expr, optimize_expr, Var, Const, BinOp, Mem
+from state import SymbolicState
+
 import unittest
 import tempfile
 import os
@@ -155,7 +155,7 @@ class TestTraceExecution(unittest.TestCase):
         engine = SymbolicEngine(self.state)
         engine.parse_trace_and_execute(trace)
 
-        addr_str = str(Var("rsp", 0))
+        addr_str = str(0x7fffffff)
         self.assertIn(addr_str, self.state.mem)
         self.assertEqual(str(self.state.mem[addr_str]), str(0x100))
 
@@ -196,11 +196,11 @@ class TestTraceExecution(unittest.TestCase):
         engine = SymbolicEngine(self.state)
         engine.parse_trace_and_execute(trace)
 
-        addr_str = str(Var("rsp", 0))
+        addr_str = str(0x7fffffff)
         self.assertIn(addr_str, self.state.mem)
         self.assertIsInstance(self.state.mem[addr_str], BinOp)
         self.assertEqual(str(self.state.mem[addr_str]), str(
-            "(mem[rsp_0]_1 + rax_1)"))
+            f"(mem[{addr_str}]_1 + rax_1)"))
 
         opt = optimize_expr(self.state.mem[addr_str], self.state)
         self.assertEqual(str(opt), str(0x10 + 0x14))
@@ -219,7 +219,7 @@ class TestTraceExecution(unittest.TestCase):
         self.assertIn("rax_2", self.state.definitions)
         self.assertIsInstance(self.state.definitions["rax_2"], BinOp)
         self.assertEqual(str(self.state.definitions["rax_2"]), str(
-            "(rax_1 + mem[rsp_0])"))
+            "(rax_1 + mem[rsp_1])"))
 
     def test_skipped_instructions(self):
         """Test that certain instructions are properly skipped."""
@@ -234,8 +234,8 @@ class TestTraceExecution(unittest.TestCase):
         engine = SymbolicEngine(self.state)
         engine.parse_trace_and_execute(trace)
 
-        # Only the mov should be executed
-        self.assertEqual(len(self.state.reg_versions), 1)
+        # Only the mov should be executed -- %rax and initial state regs
+        self.assertEqual(len(self.state.reg_versions), 2 + 1)
         self.assertEqual(str(self.state.definitions["rax_1"]), str(0x2A))
 
     def test_register_name_normalization(self):
@@ -711,7 +711,7 @@ class TestIntegration(unittest.TestCase):
         # Check final state
         self.assertIn("rax_2", state.definitions)
 
-        addr_str = str(Var("rsp", 0))
+        addr_str = str(0x7fffffff)
         self.assertIn(addr_str, state.mem)
 
         final_rax = Var("rax", 2)
@@ -758,7 +758,7 @@ class TestIntegration(unittest.TestCase):
         engine = SymbolicEngine(state)
         engine.parse_trace_and_execute(trace)
 
-        addr_str = str(Var("rsp", 0))
+        addr_str = str(0x7fffffff)
         self.assertIn(addr_str, state.mem)
 
         final_rax = state.current_var("rax")
@@ -815,7 +815,8 @@ class TestIntegration(unittest.TestCase):
         self.assertIsInstance(expanded, BinOp)
         self.assertEqual(expanded.op, "+")
         self.assertIsInstance(expanded.left, Mem)
-        self.assertEqual(str(expanded.left), "mem[rsp_0]")
+        addr_str = str(0x7fffffff)
+        self.assertEqual(str(expanded.left), f"mem[{addr_str}]")
         self.assertIsInstance(expanded.right, Const)
         self.assertEqual(expanded.right.value, 1)
 
@@ -898,7 +899,8 @@ class TestErrorHandling(unittest.TestCase):
         engine = SymbolicEngine(state)
         engine.parse_trace_and_execute([])
 
-        self.assertEqual(len(state.reg_versions), 0)
+        # no execution, but %rsp and %rip always exist
+        self.assertEqual(len(state.reg_versions), 2)
         self.assertEqual(len(state.mem), 0)
 
     def test_whitespace_handling(self):

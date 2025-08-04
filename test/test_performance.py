@@ -1,11 +1,10 @@
-from engine import (
-    SymbolicEngine, expand_expr, optimize_expr,
-    Var, Const, BinOp
-)
+from expr import expand_expr, optimize_expr, Var, Const, BinOp
+from engine import SymbolicEngine
 import time
 import unittest
 import sys
 import os
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 

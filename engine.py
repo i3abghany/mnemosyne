@@ -6,7 +6,7 @@ from capstone import *
 from capstone.x86_const import *
 
 from parser import TraceParser, OperandType
-from expr import Expr, Const, Var, Mem, BinOp, optimize_expr, expand_expr
+from expr import Expr, Const, Mem, BinOp, optimize_expr, expand_expr
 from state import SymbolicState
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -100,6 +100,8 @@ class SymbolicEngine:
     def __init__(self, state: SymbolicState = None):
         self.state = state or SymbolicState()
         self.parser = None
+        self.state.write_reg("rsp", Const(0x7fffffff))
+        self.state.write_reg("rip", Const(0x1000))
 
     def parse_trace_and_execute(self, trace: List[str]):
         parsed_instructions = self.parser = TraceParser(trace).parse()
@@ -146,7 +148,6 @@ class SymbolicEngine:
 
         src_operand, dst_operand = operands
 
-        # Handle source operand - if it's memory, we need to load from it
         if src_operand.type == OperandType.MEM:
             addr = build_memory_address(src_operand.mem, self.state)
             addr = optimize_expr(addr, self.state)
@@ -154,7 +155,6 @@ class SymbolicEngine:
         else:
             src_expr = operand_to_expr(src_operand, self.state)
 
-        # Get destination
         dst_type, dst_id = operand_to_lvalue(dst_operand, self.state)
 
         if dst_type == "reg":
@@ -176,7 +176,6 @@ class SymbolicEngine:
 
         src_operand, dst_operand = operands
 
-        # For LEA, we want the address itself, not the memory content
         if src_operand.type == OperandType.MEM:
             addr_expr = build_memory_address(src_operand.mem, self.state)
         elif src_operand.type == OperandType.IMM:
@@ -186,7 +185,6 @@ class SymbolicEngine:
                 f"Unexpected LEA source operand type: {src_operand.type}")
             return
 
-        # Get destination
         dst_type, dst_id = operand_to_lvalue(dst_operand, self.state)
 
         if dst_type == "reg":
@@ -232,21 +230,16 @@ class SymbolicEngine:
 
         sym_op = op_map[mnemonic]
 
-        # Get source value
         src_expr = operand_to_expr(src_operand, self.state)
-
-        # Get destination
         dst_type, dst_id = operand_to_lvalue(dst_operand, self.state)
 
         if dst_type == "reg":
-            # Read current value of destination register
             dst_expr = operand_to_expr(dst_operand, self.state)
             new_expr = BinOp(sym_op, dst_expr, src_expr)
             var, _ = self.state.write_reg(dst_id, new_expr)
             logger.info(f"{var} = {new_expr}")
 
         elif dst_type == "mem":
-            # Read current value from memory
             # dst_id is a Mem(addr) object, we need just the address
             if isinstance(dst_id, Mem):
                 addr = optimize_expr(dst_id.addr, self.state)

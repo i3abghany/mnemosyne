@@ -1,7 +1,10 @@
+from engine import SymbolicState, SymbolicEngine
+from expr import Var, Mem, Const, BinOp, expand_expr, optimize_expr
 from engine import *
 import unittest
 import sys
 import os
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
@@ -29,7 +32,8 @@ class TestCyclicMemoryFix(unittest.TestCase):
         self.assertIsInstance(expanded, BinOp)
         self.assertEqual(expanded.op, "+")
         self.assertIsInstance(expanded.left, Mem)
-        self.assertEqual(str(expanded.left), "mem[rsp_0]")
+        addr_str = str(0x7fffffff)
+        self.assertEqual(str(expanded.left), f"mem[{addr_str}]")
         self.assertIsInstance(expanded.right, Const)
         self.assertEqual(expanded.right.value, 1)
 

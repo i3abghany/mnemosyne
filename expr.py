@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-import logging
 
 
 class Expr:
@@ -170,18 +169,3 @@ def expand_expr(expr: Expr, state, visited: set = None) -> Expr:
         return expr
     finally:
         visited.remove(expr_str)
-
-
-def print_expr_tree(logger: logging.Logger, expr: Expr, indent: str = ""):
-    logger.info(f"{indent}{expr}")
-
-    if isinstance(expr, Var) or isinstance(expr, Const):
-        return
-
-    if isinstance(expr, BinOp):
-        print_expr_tree(expr.left, indent + "  ")
-        print_expr_tree(expr.right, indent + "  ")
-    elif isinstance(expr, Mem):
-        print_expr_tree(expr.addr, indent + "  ")
-    else:
-        logger.warning(f"Unknown expression type: {type(expr)}")
