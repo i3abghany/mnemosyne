@@ -112,11 +112,11 @@ class SymbolicEngine:
         mnemonic = instruction.mnemonic
         operands = instruction.operands
 
-        if mnemonic in ["retq", "cltq"]:
+        if mnemonic in ["retq", "cltq", "cltd"]:
             logger.debug(f"Skipping: {mnemonic}")
             return
 
-        if mnemonic.startswith(("cmp", "test", "j")):
+        if mnemonic.startswith(("cmp", "test", "j", "nop")):
             logger.debug(f"Skipping: {mnemonic}")
             return
 
@@ -128,19 +128,102 @@ class SymbolicEngine:
                 self._handle_lea(operands)
 
             elif mnemonic.startswith(
-                ("add", "sub", "xor", "and", "or", "imul", "shl", "shr", "sar")
+                ("add", "sub", "xor", "and", "or", "not",
+                 "neg", "imul", "shl", "shr", "sar")
             ):
                 self._handle_arithmetic(instruction, operands)
+
+            elif mnemonic.startswith("idivl"):
+                self._handle_idivl(operands)
 
             elif mnemonic.startswith("rep movsq"):
                 self._handle_rep_movsq(operands)
 
+            elif mnemonic.startswith("pushq"):
+                self._handle_push(operands)
+
+            elif mnemonic.startswith("popq"):
+                self._handle_pop(operands)
+
+            elif mnemonic.startswith("set"):
+                logger.warning(f"SET instructions not implemented: {mnemonic}")
+                return
+
+            elif mnemonic.startswith("callq"):
+                pass
+
             else:
-                logger.warning(f"Unhandled instruction: {mnemonic}")
+                logger.warning(
+                    f"Unhandled instruction: {mnemonic} with operands {operands}")
                 exit(-1)
 
         except Exception as e:
             logger.error(f"Error executing {mnemonic}: {e}")
+
+    def _handle_idivl(self, operands):
+        if len(operands) != 1:
+            logger.warning(f"IDIVL with {len(operands)} operands")
+            return
+
+        src_operand = operands[0]
+        src_expr = None
+        if src_operand.type == OperandType.MEM:
+            addr = build_memory_address(src_operand.mem, self.state)
+            addr = optimize_expr(addr, self.state)
+            src_expr = self.state.mem_load(addr)
+        else:
+            src_expr = operand_to_expr(src_operand, self.state)
+
+        quotient = BinOp("/", self.state.read_reg("rax"), src_expr)
+        remainder = BinOp("%", self.state.read_reg("rax"), src_expr)
+
+        self.state.write_reg("rax", quotient)
+        self.state.write_reg("rdx", remainder)
+        logger.info(f"RAX = {quotient}, RDX = {remainder}")
+
+    def _handle_push(self, operands):
+        if len(operands) != 1:
+            logger.warning(f"PUSH with {len(operands)} operands")
+            return
+
+        src_operand = operands[0]
+        if src_operand.type != OperandType.REG:
+            logger.warning(
+                f"Unsupported PUSH operand type: {src_operand.type}")
+            return
+
+        reg_name = normalize_register_name(src_operand.reg)
+        src_expr = self.state.read_reg(reg_name)
+
+        rsp_expr = self.state.read_reg("rsp")
+        new_rsp = BinOp("-", rsp_expr, Const(8))
+        new_rsp = optimize_expr(new_rsp, self.state)
+        self.state.write_reg("rsp", new_rsp)
+
+        mem_var, _ = self.state.mem_store(new_rsp, src_expr)
+        logger.info(f"{mem_var} = {src_expr}")
+
+    def _handle_pop(self, operands):
+        if len(operands) != 1:
+            logger.warning(f"POP with {len(operands)} operands")
+            return
+
+        dst_operand = operands[0]
+        if dst_operand.type != OperandType.REG:
+            logger.warning(f"Unsupported POP operand type: {dst_operand.type}")
+            return
+
+        reg_name = normalize_register_name(dst_operand.reg)
+
+        rsp_expr = self.state.read_reg("rsp")
+        src_expr = self.state.mem_load(rsp_expr)
+
+        var, _ = self.state.write_reg(reg_name, src_expr)
+        logger.info(f"{var} = {src_expr}")
+
+        new_rsp = BinOp("+", rsp_expr, Const(8))
+        new_rsp = optimize_expr(new_rsp, self.state)
+        self.state.write_reg("rsp", new_rsp)
 
     def _handle_mov(self, operands):
         if len(operands) != 2:
@@ -215,6 +298,10 @@ class SymbolicEngine:
             "andl": "&",
             "orq": "|",
             "orl": "|",
+            "notq": "~",
+            "notl": "~",
+            "negq": "-",
+            "negl": "-",
             "shlq": "<<",
             "shll": "<<",
             "shrq": ">>",
