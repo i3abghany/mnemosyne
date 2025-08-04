@@ -44,7 +44,7 @@ class TestPerformance(unittest.TestCase):
         # expressions
         trace = ["mov $1, %rax"]
         for i in range(100):
-            trace.append(f"add $1, %rax")
+            trace.append("add $1, %rax")
 
         start_time = time.time()
         engine.parse_trace_and_execute(trace)
