@@ -137,6 +137,7 @@ class SymbolicEngine:
 
             else:
                 logger.warning(f"Unhandled instruction: {mnemonic}")
+                exit(-1)
 
         except Exception as e:
             logger.error(f"Error executing {mnemonic}: {e}")
