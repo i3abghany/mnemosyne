@@ -143,7 +143,7 @@ class TestTraceExecution(unittest.TestCase):
 
     def test_mov_immediate_to_register(self):
         """Test mov $imm, %reg instructions."""
-        trace = ["movq $42, %rax"]
+        trace = ["movq $0x42, %rax"]
         engine = SymbolicEngine(self.state)
         engine.parse_trace_and_execute(trace)
 
@@ -153,24 +153,23 @@ class TestTraceExecution(unittest.TestCase):
 
     def test_mov_immediate_to_memory(self):
         """Test mov $imm, mem instructions."""
-        trace = ["movq $100, (%rsp)"]
+        trace = ["movq $0x100, (%rsp)"]
         engine = SymbolicEngine(self.state)
         engine.parse_trace_and_execute(trace)
 
-        # Should create memory variable
         addr_str = str(Var("rsp", 0))
         self.assertIn(addr_str, self.state.mem)
         self.assertEqual(str(self.state.mem[addr_str]), str(0x100))
 
     def test_mov_memory_to_register(self):
         """Test mov mem, %reg instructions."""
-        # First store something in memory
-        trace1 = ["movq $55, (%rsp)"]
+        trace1 = ["movq $0x37, (%rsp)"]
         engine = SymbolicEngine(self.state)
         engine.parse_trace_and_execute(trace1)
 
         # Then load it to register
         trace2 = ["movq (%rsp), %rax"]
+        engine = SymbolicEngine(self.state)
         engine.parse_trace_and_execute(trace2)
 
         self.assertIn("rax_1", self.state.definitions)
@@ -178,36 +177,41 @@ class TestTraceExecution(unittest.TestCase):
     def test_add_immediate_to_register(self):
         """Test add $imm, %reg instructions."""
         trace = [
-            "movq $10, %rax",
-            "addq $5, %rax"
+            "movq $0x10, %rax",
+            "addq $0x5, %rax"
         ]
         engine = SymbolicEngine(self.state)
         engine.parse_trace_and_execute(trace)
 
-        # Should have rax_1 = 10, rax_2 = (rax_1 + 5)
-        print(self.state.definitions)
         self.assertEqual(str(self.state.definitions["rax_1"]), str(0x10))
         self.assertIsInstance(self.state.definitions["rax_2"], BinOp)
+        self.assertEqual(
+            str(self.state.definitions["rax_2"]), str("(rax_1 + 5)"))
 
     def test_add_register_to_memory(self):
         """Test add %reg, mem instructions."""
         trace = [
-            "movq $20, %rax",
-            "movq $30, (%rsp)",
+            "movq $0x14, %rax",
+            "movq $0x10, (%rsp)",
             "addq %rax, (%rsp)"
         ]
         engine = SymbolicEngine(self.state)
         engine.parse_trace_and_execute(trace)
 
-        # Memory should be updated with addition
         addr_str = str(Var("rsp", 0))
         self.assertIn(addr_str, self.state.mem)
+        self.assertIsInstance(self.state.mem[addr_str], BinOp)
+        self.assertEqual(str(self.state.mem[addr_str]), str(
+            "(mem[rsp_0]_1 + rax_1)"))
+
+        opt = optimize_expr(self.state.mem[addr_str], self.state)
+        self.assertEqual(str(opt), str(0x10 + 0x14))
 
     def test_add_memory_to_register(self):
         """Test add mem, %reg instructions."""
         trace = [
-            "movq $15, %rax",
-            "movq $25, (%rsp)",
+            "movq $0xF, %rax",
+            "movq $0x19, (%rsp)",
             "addq (%rsp), %rax"
         ]
         engine = SymbolicEngine(self.state)
@@ -216,6 +220,8 @@ class TestTraceExecution(unittest.TestCase):
         # Register should be updated
         self.assertIn("rax_2", self.state.definitions)
         self.assertIsInstance(self.state.definitions["rax_2"], BinOp)
+        self.assertEqual(str(self.state.definitions["rax_2"]), str(
+            "(rax_1 + mem[rsp_0])"))
 
     def test_skipped_instructions(self):
         """Test that certain instructions are properly skipped."""
@@ -261,10 +267,13 @@ class TestExpressionExpansion(unittest.TestCase):
 
     def test_expand_var_with_definition(self):
         """Test expanding variables that have definitions."""
+        # Set up state with a definition first
+        self.state.write_reg("rax", Const(0x2A))  # 42 in decimal
+
         var = Var("rax", 1)
         expanded = expand_expr(var, self.state)
         self.assertIsInstance(expanded, Const)
-        self.assertEqual(expanded.value, 42)
+        self.assertEqual(expanded.value, 0x2A)
 
     def test_expand_var_without_definition(self):
         """Test expanding variables without definitions."""
@@ -274,15 +283,24 @@ class TestExpressionExpansion(unittest.TestCase):
 
     def test_expand_binop(self):
         """Test expanding binary operations."""
-        var = Var("rbx", 1)  # rbx_2 = (rax_1 + 8)
+        # Set up state with definitions first
+        self.state.write_reg("rax", Const(0x42))
+        self.state.write_reg("rbx", BinOp("+", Var("rax", 1), Const(0x8)))
+
+        var = Var("rbx", 1)
         expanded = expand_expr(var, self.state)
-        # Should expand to (42 + 8)
+
         self.assertIsInstance(expanded, BinOp)
         self.assertEqual(expanded.op, "+")
 
+        self.assertIsInstance(expanded.left, Const)
+        self.assertEqual(expanded.left.value, 0x42)
+
+        self.assertIsInstance(expanded.right, Const)
+        self.assertEqual(expanded.right.value, 0x8)
+
     def test_expand_mem(self):
         """Test expanding memory expressions."""
-        # Store something in memory first
         addr = Const(0x1000)
         self.state.mem_store(addr, Const(123))
 
@@ -300,10 +318,10 @@ class TestExpressionExpansion(unittest.TestCase):
 
     def test_expand_cyclic_memory_reference(self):
         """Test expanding memory expressions that reference themselves (cyclic references)."""
-        addr = Var("rsp", 0)  # rsp_0
+        addr = Var("rsp", 0)
         mem_expr = Mem(addr)
 
-        cyclic_value = BinOp("+", mem_expr, Const(1))  # (mem[rsp_0] + 1)
+        cyclic_value = BinOp("+", mem_expr, Const(1))
         self.state.mem_store(addr, cyclic_value)
 
         expanded = expand_expr(mem_expr, self.state)
@@ -473,39 +491,38 @@ class TestIntegration(unittest.TestCase):
         state = SymbolicState()
 
         trace = [
-            "mov $10, %rax",
-            "mov $20, %rbx",
+            "mov $0xA, %rax",
+            "mov $0x14, %rbx",
             "add %rbx, %rax",
             "mov %rax, (%rsp)",
-            # "5" and "(%rsp)" are not enough to determine the operation size. suffix "q" is needed
-            "addq $5, (%rsp)"
+            "addq $0x5, (%rsp)"
         ]
 
         engine = SymbolicEngine(state)
         engine.parse_trace_and_execute(trace)
 
         # Check final state
-        self.assertIn("rax_2", state.definitions)  # Final rax version
+        self.assertIn("rax_2", state.definitions)
 
-        # Check memory was updated
         addr_str = str(Var("rsp", 0))
         self.assertIn(addr_str, state.mem)
 
-        # Test optimization of final expression
         final_rax = Var("rax", 2)
         optimized = optimize_expr(final_rax, state)
-        # Should resolve to some expression involving the operations
+        self.assertIsNotNone(optimized)
+        self.assertIsInstance(optimized, Const)
+        self.assertEqual(optimized.value, 0xA + 0x14)
 
     def test_fibonacci_like_sequence(self):
         """Test a fibonacci-like sequence of operations."""
         state = SymbolicState()
 
         trace = [
-            "mov $1, %rax",      # rax = 1
-            "mov $1, %rbx",      # rbx = 1
-            "add %rbx, %rax",    # rax = rax + rbx = 2
-            "add %rax, %rbx",    # rbx = rbx + rax = 3
-            "add %rbx, %rax",    # rax = rax + rbx = 5
+            "mov $0x1, %rax",
+            "mov $0x1, %rbx",
+            "add %rbx, %rax",
+            "add %rax, %rbx",
+            "add %rbx, %rax",
         ]
 
         engine = SymbolicEngine(state)
@@ -526,8 +543,8 @@ class TestIntegration(unittest.TestCase):
         state = SymbolicState()
 
         trace = [
-            "movq $100, (%rsp)",
-            "addq $50, (%rsp)",
+            "movq $0x64, (%rsp)",
+            "addq $0x32, (%rsp)",
             "mov (%rsp), %rax"
         ]
 
@@ -541,12 +558,12 @@ class TestIntegration(unittest.TestCase):
         expanded = expand_expr(final_rax, state)
         optimized = optimize_expr(expanded, state)
         self.assertIsInstance(optimized, Const)
-        self.assertEqual(optimized.value, 0x100 + 0x50)
+        self.assertEqual(optimized.value, 0x64 + 0x32)
 
     def test_file_based_trace(self):
         trace_content = """
-0x400500: mov $42, %rax
-0x400505: mov $8, %rbx  
+0x400500: mov $0x2A, %rax
+0x400505: mov $0x8, %rbx
 0x40050a: add %rbx, %rax
 0x40050f: mov %rax, (%rsp)
         """.strip()
@@ -577,13 +594,11 @@ class TestIntegration(unittest.TestCase):
         engine = SymbolicEngine(state)
 
         trace = [
-            # mem[rsp_0] = (mem[rsp_0] + 1) - creates cycle
-            "addq $1, (%rsp)",
+            "addq $0x1, (%rsp)",
             "mov (%rsp), %rax",   # rax_1 = (mem[rsp_0] + 1)
             "mov (%rsp), %rax",   # rax_2 = (mem[rsp_0] + 1)
         ]
 
-        # This should NOT cause infinite recursion
         engine.parse_trace_and_execute(trace)
 
         final_rax = state.current_var("rax")
@@ -605,13 +620,11 @@ class TestIntegration(unittest.TestCase):
         engine = SymbolicEngine(state)
 
         trace = [
-            "movq $10, (%rsp)",      # mem[rsp_0] = 10
-            "addq $5, (%rsp)",       # mem[rsp_0] = (mem[rsp_0] + 5) = (10 + 5)
-            # rax_1 = (rax_0 + mem[rsp_0]) = (rax_0 + (10 + 5))
+            "movq $0xA, (%rsp)",
+            "addq $0x5, (%rsp)",
             "addq (%rsp), %rax",
-            "movq %rax, 8(%rsp)",    # mem[(8 + rsp_0)] = rax_1
-            "movq 8(%rsp), %rbx",    # rbx_1 = rax_1 - load stored value
-            # rax_2 = (rax_1 + rbx_1) - more complex expression
+            "movq %rax, 8(%rsp)",
+            "movq 8(%rsp), %rbx",
             "addq %rbx, %rax",
         ]
 
@@ -646,8 +659,8 @@ class TestErrorHandling(unittest.TestCase):
     def test_whitespace_handling(self):
         state = SymbolicState()
         trace = [
-            "   mov $42, %rax   ",
-            "\t\tadd $8, %rax\t",
+            "   mov $0x2A, %rax   ",
+            "\t\tadd $0x8, %rax\t",
             "",
             "   ",
             "mov %rax, (%rsp)"
